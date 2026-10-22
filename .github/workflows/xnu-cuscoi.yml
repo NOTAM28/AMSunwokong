@@ -36,7 +36,44 @@ jobs:
             -print0 2>/dev/null | xargs -0 grep -l 'sweet_early' 2>/dev/null \
             | while read -r f; do sed -i.bak 's/sweet_early/cuscoi_early/g' "$f" || true; done
           mkdir -p osfmk/arm64
-          printf '%s\n' '#ifndef _ARM64_CUSCOI_EARLY_H_' '#define _ARM64_CUSCOI_EARLY_H_' '#endif' > osfmk/arm64/cuscoi_early.h
+          cat > osfmk/arm64/cuscoi_early.h << 'EH'
+          #ifndef _ARM64_CUSCOI_EARLY_H_
+          #define _ARM64_CUSCOI_EARLY_H_
+          #ifdef __cplusplus
+          extern "C" {
+          #endif
+          static inline void cuscoi_early_mark(int stage, const char *msg) { (void)stage; (void)msg; }
+          static inline void cuscoi_early_disable(void) { }
+          static inline void cuscoi_early_putc(char c) { (void)c; }
+          static inline void cuscoi_early_puts(const char *s) { (void)s; }
+          #ifdef __cplusplus
+          }
+          #endif
+          #endif
+          EH
+          # Minimal PE that satisfies the Makefile object list
+          mkdir -p iokit/Kernel/arm
+          cat > iokit/Kernel/arm/SweetPlatformExpert.cpp << 'PE'
+          #include <IOKit/IOLib.h>
+          #include <IOKit/IOPlatformExpert.h>
+          #include <IOKit/IODeviceTreeSupport.h>
+          class SweetPlatformExpert : public IOPlatformExpert {
+              OSDeclareDefaultStructors(SweetPlatformExpert)
+          public:
+              virtual bool start(IOService *provider) APPLE_KEXT_OVERRIDE;
+              virtual void processTopLevel(IORegistryEntry *rootEntry);
+          };
+          OSDefineMetaClassAndStructors(SweetPlatformExpert, IOPlatformExpert)
+          bool SweetPlatformExpert::start(IOService *provider)
+          {
+              return super::start(provider);
+          }
+          void SweetPlatformExpert::processTopLevel(IORegistryEntry *rootEntry)
+          {
+              (void)rootEntry;
+          }
+          PE
+
           mkdir -p bsd/sys BUILD/obj/bsd/sys
           echo '/* stub */' > bsd/sys/_symbol_aliasing.h
           echo '/* stub */' > bsd/sys/_posix_availability.h
@@ -83,6 +120,10 @@ jobs:
           #pragma clang diagnostic ignored "-Wshorten-64-to-32"
           #pragma clang diagnostic ignored "-Wsign-compare"
           #pragma clang diagnostic ignored "-Wunused-function"
+          #pragma clang diagnostic ignored "-Wabsolute-value"
+          #pragma clang diagnostic ignored "-Wimplicit-function-declaration"
+          #pragma clang diagnostic ignored "-Wtautological-compare"
+          #pragma clang diagnostic ignored "-Wtautological-value-range-compare"
           #pragma clang diagnostic ignored "-Wpointer-to-int-cast"
           #pragma clang diagnostic ignored "-Wsingle-bit-bitfield-constant-conversion"
           #pragma clang diagnostic ignored "-Wbitfield-constant-conversion"
