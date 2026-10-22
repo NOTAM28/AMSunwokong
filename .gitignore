@@ -1,0 +1,17 @@
+boot.img
+dtbo.img
+vendor_boot.img
+dtb/
+shim/
+*.img
+*.elf
+*.o
+*.bin
+notes/
+tools/adt/*.bin
+tools/pack/*.bin
+tools/pack/shim-plus-adt.bin
+__pycache__/
+.DS_Store
+xnu-src/
+out/

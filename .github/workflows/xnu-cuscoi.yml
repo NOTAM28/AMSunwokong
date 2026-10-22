@@ -1,0 +1,71 @@
+name: xnu-cuscoi
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - "xnu/patches/**"
+      - "scripts/**"
+      - ".github/workflows/xnu-cuscoi.yml"
+
+jobs:
+  build:
+    runs-on: macos-14
+    timeout-minutes: 180
+    steps:
+      - name: Checkout Ada / cuscoi tree
+        uses: actions/checkout@v4
+
+      - name: Fetch XNU 8796.41.1 (iOS 16-era open source)
+        run: |
+          git clone --depth 1 --branch xnu-8796.41.1 \
+            https://github.com/apple-oss-distributions/xnu.git xnu-src
+          # If tag missing, try:
+          # git clone https://github.com/apple-oss-distributions/xnu.git xnu-src
+          # cd xnu-src && git checkout xnu-8796.41.1
+
+      - name: Apply first-wave patches
+        run: |
+          chmod +x scripts/apply-patches.sh
+          # Ensure APPLY-ORDER uses *-cuscoi-* files where listed
+          ./scripts/apply-patches.sh xnu-src xnu/patches
+
+      - name: Show toolchain
+        run: |
+          sw_vers
+          xcodebuild -version
+          clang --version | head -2
+
+      - name: Build kernel (development, ARM64, CUSCOI)
+        working-directory: xnu-src
+        run: |
+          # Flags mirror ios-sweet-style non-Apple board builds; tune after first failure log.
+          export SDKROOT=$(xcrun --sdk macosx --show-sdk-path)
+          export KERNEL_CONFIGS=RELEASE
+          # PRODUCT / machine config name must match patch 0004 (CUSCOI)
+          make \
+            SDKROOT="$SDKROOT" \
+            ARCH_CONFIGS=ARM64 \
+            KERNEL_CONFIGS=DEVELOPMENT \
+            MACHINE_CONFIGS=CUSCOI \
+            -j$(sysctl -n hw.ncpu) \
+            || make \
+              SDKROOT="$SDKROOT" \
+              ARCH_CONFIGS=ARM64 \
+              KERNEL_CONFIGS=DEVELOPMENT \
+              -j$(sysctl -n hw.ncpu)
+
+      - name: Collect Mach-O
+        run: |
+          mkdir -p out
+          find xnu-src -type f \( -name 'kernel*' -o -name '*.linked' \) 2>/dev/null | head -50
+          # Common output patterns (adjust once first build shows path):
+          find xnu-src -type f -name 'kernel.development*' -print -exec cp -v {} out/ \; || true
+          find xnu-src/BUILD -type f 2>/dev/null | head -40 || true
+          ls -la out || true
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: kernel-cuscoi-ada
+          path: out/
+          if-no-files-found: warn

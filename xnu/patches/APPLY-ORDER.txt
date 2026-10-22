@@ -1,0 +1,16 @@
+# First-wave for CI (cuscoi board files preferred)
+0001-new-clang-drop-removed-auto-var-init-flag.patch
+0002-new-clang-backport-UIO_STACKBUF.patch
+0003-cuscoi-framebuffer-serial-console.patch
+0004-cuscoi-machine-config.patch
+0005-non-pac-build-fixes.patch
+0006-sweet-master-config-open-source-asm-pmap.patch
+0007-sweet-stub-apple-internal-headers.patch
+0008-sweet-fill-closed-lib-gaps-kpc-stub.patch
+0009-sweet-drop-apple-soc-only-exports.patch
+0010-cuscoi-early-framebuffer-debug.patch
+0011-sweet-physmap-alignment-padding.patch
+0012-sweet-keep-debug-console-after-ttbr0.patch
+0016-cuscoi-device-tree-platform-expert.patch
+0017-cuscoi-device-tree-virtual-timer-irq.patch
+0018-cuscoi-boot-cpu-driver.patch
