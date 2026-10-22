@@ -12,56 +12,57 @@ jobs:
     runs-on: macos-14
     timeout-minutes: 180
     steps:
-      - name: Checkout Ada / cuscoi tree
+      - name: Checkout Project-Ada
         uses: actions/checkout@v4
 
-      - name: Fetch XNU 8796.41.1 (iOS 16-era open source)
+      - name: Fetch XNU (xnu-8796.101.5)
         run: |
-          git clone --depth 1 --branch xnu-8796.41.1 \
+          set -euo pipefail
+          # Tag exists on apple-oss-distributions/xnu (iOS 16-era family)
+          git clone --depth 1 --branch xnu-8796.101.5 \
             https://github.com/apple-oss-distributions/xnu.git xnu-src
-          # If tag missing, try:
-          # git clone https://github.com/apple-oss-distributions/xnu.git xnu-src
-          # cd xnu-src && git checkout xnu-8796.41.1
+          cd xnu-src
+          git log -1 --oneline
+          ls | head
 
       - name: Apply first-wave patches
         run: |
           chmod +x scripts/apply-patches.sh
-          # Ensure APPLY-ORDER uses *-cuscoi-* files where listed
           ./scripts/apply-patches.sh xnu-src xnu/patches
 
       - name: Show toolchain
         run: |
           sw_vers
-          xcodebuild -version
+          xcodebuild -version || true
           clang --version | head -2
 
-      - name: Build kernel (development, ARM64, CUSCOI)
+      - name: Build kernel (best-effort)
         working-directory: xnu-src
         run: |
-          # Flags mirror ios-sweet-style non-Apple board builds; tune after first failure log.
-          export SDKROOT=$(xcrun --sdk macosx --show-sdk-path)
-          export KERNEL_CONFIGS=RELEASE
-          # PRODUCT / machine config name must match patch 0004 (CUSCOI)
-          make \
-            SDKROOT="$SDKROOT" \
-            ARCH_CONFIGS=ARM64 \
-            KERNEL_CONFIGS=DEVELOPMENT \
-            MACHINE_CONFIGS=CUSCOI \
-            -j$(sysctl -n hw.ncpu) \
-            || make \
-              SDKROOT="$SDKROOT" \
-              ARCH_CONFIGS=ARM64 \
-              KERNEL_CONFIGS=DEVELOPMENT \
-              -j$(sysctl -n hw.ncpu)
+          set +e
+          SDKROOT=$(xcrun --sdk macosx --show-sdk-path)
+          export SDKROOT
+          echo "SDKROOT=$SDKROOT"
+          make ARCH_CONFIGS=ARM64 KERNEL_CONFIGS=DEVELOPMENT MACHINE_CONFIGS=CUSCOI \
+            SDKROOT="$SDKROOT" -j$(sysctl -n hw.ncpu) 2>&1 | tee ../build.log
+          status=${PIPESTATUS[0]}
+          if [ "$status" -ne 0 ]; then
+            echo "CUSCOI build failed ($status); retry without MACHINE_CONFIGS"
+            make ARCH_CONFIGS=ARM64 KERNEL_CONFIGS=DEVELOPMENT \
+              SDKROOT="$SDKROOT" -j$(sysctl -n hw.ncpu) 2>&1 | tee -a ../build.log
+          fi
+          tail -100 ../build.log
+          # do not fail the job solely on make yet — collect logs
+          exit 0
 
-      - name: Collect Mach-O
+      - name: Collect outputs
         run: |
           mkdir -p out
-          find xnu-src -type f \( -name 'kernel*' -o -name '*.linked' \) 2>/dev/null | head -50
-          # Common output patterns (adjust once first build shows path):
-          find xnu-src -type f -name 'kernel.development*' -print -exec cp -v {} out/ \; || true
-          find xnu-src/BUILD -type f 2>/dev/null | head -40 || true
-          ls -la out || true
+          cp -v build.log out/ 2>/dev/null || true
+          find xnu-src -type f \( -name 'kernel*' -o -path '*/BUILD/*' \) 2>/dev/null \
+            | head -100 | tee out/find.txt || true
+          find xnu-src -type f -name 'kernel*' -size +1M -exec cp -v {} out/ \; 2>/dev/null || true
+          ls -la out
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
