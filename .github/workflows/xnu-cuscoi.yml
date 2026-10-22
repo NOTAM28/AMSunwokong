@@ -56,6 +56,18 @@ jobs:
           [ -f bsd/vfs/vfs_cache.c ] && \
             sed -i.bak -E 's/\bchain_len\b/chain_len __attribute__((unused))/g' bsd/vfs/vfs_cache.c || true
 
+          # Drop/rename leftover Sweet PE so only CUSCOI board objects build
+          if [ -f iokit/Kernel/arm/SweetPlatformExpert.cpp ]; then
+            mv iokit/Kernel/arm/SweetPlatformExpert.cpp iokit/Kernel/arm/CuscoiPlatformExpert.cpp || true
+            sed -i.bak -e 's/SweetPlatformExpert/CuscoiPlatformExpert/g' \
+              -e 's/\broot\b/rootEntry/g' \
+              iokit/Kernel/arm/CuscoiPlatformExpert.cpp || true
+          fi
+          find . -type f \( -name '*.cpp' -o -name '*.h' -o -name 'Makefile*' \) \
+            -print0 2>/dev/null | xargs -0 grep -l 'SweetPlatformExpert' 2>/dev/null \
+            | while read -r f; do sed -i.bak 's/SweetPlatformExpert/CuscoiPlatformExpert/g' "$f" || true; done
+
+
       - name: Build kernel DEVELOPMENT ARM64 CUSCOI
         working-directory: xnu-src
         run: |
@@ -72,6 +84,14 @@ jobs:
           #pragma clang diagnostic ignored "-Wunused-variable"
           #pragma clang diagnostic ignored "-Wdeprecated-declarations"
           #pragma clang diagnostic ignored "-Wdeclaration-after-statement"
+#pragma clang diagnostic ignored "-Wshadow-field"
+#pragma clang diagnostic ignored "-Wnull-pointer-subtraction"
+#pragma clang diagnostic ignored "-Wvoid-pointer-to-int-cast"
+#pragma clang diagnostic ignored "-Wcast-align"
+#pragma clang diagnostic ignored "-Wshorten-64-to-32"
+#pragma clang diagnostic ignored "-Wsign-compare"
+#pragma clang diagnostic ignored "-Wunused-function"
+#pragma clang diagnostic ignored "-Wimplicit-function-declaration"
           H
           REAL_CLANG=$(xcrun -f clang)
           REAL_CXX=$(xcrun -f clang++)
