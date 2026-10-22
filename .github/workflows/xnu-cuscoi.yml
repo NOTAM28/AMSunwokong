@@ -1,7 +1,9 @@
 name: xnu-cuscoi
+
 on:
   workflow_dispatch:
   push:
+    branches: [main]
     paths:
       - "xnu/patches/**"
       - "scripts/**"
@@ -14,19 +16,19 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Fetch XNU (xnu-8796.101.5)
+      - name: Fetch XNU
         run: |
           set -euo pipefail
           git clone --depth 1 --branch xnu-8796.101.5 \
             https://github.com/apple-oss-distributions/xnu.git xnu-src
           cd xnu-src && git log -1 --oneline
 
-      - name: Apply first-wave patches
+      - name: Apply patches
         run: |
           chmod +x scripts/apply-patches.sh
           ./scripts/apply-patches.sh xnu-src xnu/patches
 
-      - name: Fix sweet leftovers + availability stubs + source werror
+      - name: Prep board + clang noise
         working-directory: xnu-src
         run: |
           set -euo pipefail
@@ -34,32 +36,24 @@ jobs:
             -print0 2>/dev/null | xargs -0 grep -l 'sweet_early' 2>/dev/null \
             | while read -r f; do sed -i.bak 's/sweet_early/cuscoi_early/g' "$f" || true; done
           mkdir -p osfmk/arm64
-          [ -f osfmk/arm64/cuscoi_early.h ] || printf '%s\n' '#ifndef _ARM64_CUSCOI_EARLY_H_' '#define _ARM64_CUSCOI_EARLY_H_' '#endif' > osfmk/arm64/cuscoi_early.h
+          printf '%s\n' '#ifndef _ARM64_CUSCOI_EARLY_H_' '#define _ARM64_CUSCOI_EARLY_H_' '#endif' > osfmk/arm64/cuscoi_early.h
           mkdir -p bsd/sys BUILD/obj/bsd/sys
-          echo '/* CI stub */' > bsd/sys/_symbol_aliasing.h
-          echo '/* CI stub */' > bsd/sys/_posix_availability.h
-          cp -f bsd/sys/_symbol_aliasing.h bsd/sys/_posix_availability.h BUILD/obj/bsd/sys/ 2>/dev/null || true
+          echo '/* stub */' > bsd/sys/_symbol_aliasing.h
+          echo '/* stub */' > bsd/sys/_posix_availability.h
+          cp -f bsd/sys/_symbol_aliasing.h bsd/sys/_posix_availability.h BUILD/obj/bsd/sys/ || true
           printf '#!/bin/bash\nexit 0\n' > bsd/sys/make_symbol_aliasing.sh
           chmod +x bsd/sys/make_symbol_aliasing.sh
-          # OSMetaClass pragma
           H=libkern/c++/OSMetaClass.h
-          if [ -f "$H" ] && ! grep -q 'CI: xcode15 werror' "$H"; then
-            { echo '/* CI: xcode15 werror */'
-              echo '#pragma clang diagnostic push'
-              echo '#pragma clang diagnostic ignored "-Wsuggest-override"'
-              echo '#pragma clang diagnostic ignored "-Wsuggest-destructor-override"'
+          if [ -f "$H" ] && ! grep -q 'CI: xcode15' "$H"; then
+            { echo '/* CI: xcode15 */'; echo '#pragma clang diagnostic push';
+              echo '#pragma clang diagnostic ignored "-Wsuggest-override"';
+              echo '#pragma clang diagnostic ignored "-Wsuggest-destructor-override"';
               cat "$H"; } > "$H.tmp" && mv "$H.tmp" "$H"
           fi
-          # unused vars
-          [ -f iokit/Kernel/IOUserServer.cpp ] && \
-            sed -i.bak -E 's/\b(msgid|machid)\b/\1 __attribute__((unused))/g' iokit/Kernel/IOUserServer.cpp || true
-          [ -f bsd/vfs/vfs_cache.c ] && \
-            sed -i.bak -E 's/\bchain_len\b/chain_len __attribute__((unused))/g' bsd/vfs/vfs_cache.c || true
-
-          # Drop/rename leftover Sweet PE so only CUSCOI board objects build
           if [ -f iokit/Kernel/arm/SweetPlatformExpert.cpp ]; then
-            mv iokit/Kernel/arm/SweetPlatformExpert.cpp iokit/Kernel/arm/CuscoiPlatformExpert.cpp || true
+            mv iokit/Kernel/arm/SweetPlatformExpert.cpp iokit/Kernel/arm/CuscoiPlatformExpert.cpp
             sed -i.bak -e 's/SweetPlatformExpert/CuscoiPlatformExpert/g' \
+              -e 's/processTopLevel(IORegistryEntry \*root)/processTopLevel(IORegistryEntry *rootEntry)/g' \
               -e 's/\broot\b/rootEntry/g' \
               iokit/Kernel/arm/CuscoiPlatformExpert.cpp || true
           fi
@@ -67,16 +61,15 @@ jobs:
             -print0 2>/dev/null | xargs -0 grep -l 'SweetPlatformExpert' 2>/dev/null \
             | while read -r f; do sed -i.bak 's/SweetPlatformExpert/CuscoiPlatformExpert/g' "$f" || true; done
 
-
-      - name: Build kernel DEVELOPMENT ARM64 CUSCOI
+      - name: Build
         working-directory: xnu-src
         run: |
           set -euo pipefail
           SDKROOT=$(xcrun --sdk macosx --show-sdk-path)
           export SDKROOT
           BIN="$GITHUB_WORKSPACE/ci-bin"
-          mkdir -p "$BIN"
           OFF="$GITHUB_WORKSPACE/ci-werror-off.h"
+          mkdir -p "$BIN"
           cat > "$OFF" << 'H'
           #pragma clang diagnostic ignored "-Wsuggest-override"
           #pragma clang diagnostic ignored "-Wsuggest-destructor-override"
@@ -84,40 +77,26 @@ jobs:
           #pragma clang diagnostic ignored "-Wunused-variable"
           #pragma clang diagnostic ignored "-Wdeprecated-declarations"
           #pragma clang diagnostic ignored "-Wdeclaration-after-statement"
-#pragma clang diagnostic ignored "-Wshadow-field"
-#pragma clang diagnostic ignored "-Wnull-pointer-subtraction"
-#pragma clang diagnostic ignored "-Wvoid-pointer-to-int-cast"
-#pragma clang diagnostic ignored "-Wcast-align"
-#pragma clang diagnostic ignored "-Wshorten-64-to-32"
-#pragma clang diagnostic ignored "-Wsign-compare"
-#pragma clang diagnostic ignored "-Wunused-function"
-#pragma clang diagnostic ignored "-Wimplicit-function-declaration"
+          #pragma clang diagnostic ignored "-Wshadow-field"
+          #pragma clang diagnostic ignored "-Wnull-pointer-subtraction"
+          #pragma clang diagnostic ignored "-Wvoid-pointer-to-int-cast"
+          #pragma clang diagnostic ignored "-Wcast-align"
+          #pragma clang diagnostic ignored "-Wshorten-64-to-32"
+          #pragma clang diagnostic ignored "-Wsign-compare"
+          #pragma clang diagnostic ignored "-Wunused-function"
           H
           REAL_CLANG=$(xcrun -f clang)
           REAL_CXX=$(xcrun -f clang++)
-          # Single-path executables (mig requires argv[0] with no spaces)
-          cat > "$BIN/clang" << EOF
-          #!/bin/bash
-          exec "$REAL_CLANG" -include "$OFF" "\$@"
-          EOF
-          cat > "$BIN/clang++" << EOF
-          #!/bin/bash
-          exec "$REAL_CXX" -include "$OFF" "\$@"
-          EOF
-          cat > "$BIN/cpp-wrap" << EOF
-          #!/bin/bash
-          exec "$REAL_CLANG" -E -include "$OFF" "\$@"
-          EOF
+          printf '#!/bin/bash\nexec "%s" -include "%s" "$@"\n' "$REAL_CLANG" "$OFF" > "$BIN/clang"
+          printf '#!/bin/bash\nexec "%s" -include "%s" "$@"\n' "$REAL_CXX" "$OFF" > "$BIN/clang++"
+          printf '#!/bin/bash\nexec "%s" -E -include "%s" "$@"\n' "$REAL_CLANG" "$OFF" > "$BIN/cpp-wrap"
           chmod +x "$BIN/clang" "$BIN/clang++" "$BIN/cpp-wrap"
-          # Do NOT put spaces in CC/CXX values
           make ARCH_CONFIGS=ARM64 KERNEL_CONFIGS=DEVELOPMENT MACHINE_CONFIGS=CUSCOI \
             SDKROOT="$SDKROOT" \
-            CC="$BIN/clang" \
-            CXX="$BIN/clang++" \
-            CPP="$BIN/cpp-wrap" \
+            CC="$BIN/clang" CXX="$BIN/clang++" CPP="$BIN/cpp-wrap" \
             -j$(sysctl -n hw.ncpu) 2>&1 | tee ../build.log
 
-      - name: Collect outputs
+      - name: Collect
         if: always()
         run: |
           mkdir -p out
@@ -129,8 +108,7 @@ jobs:
             [ "$sz" -gt 1000000 ] && cp -v "$f" "out/$(basename "$f")"
           done < out/find.txt || true
           ls -la out
-          echo "---- hard errors ----"
-          grep -E 'error:|fatal error:|mig: fatal' build.log | grep -v 'warning:' | head -40 || true
+          grep -E 'error:|fatal error:' build.log 2>/dev/null | grep -v warning | head -40 || true
 
       - uses: actions/upload-artifact@v4
         if: always()
