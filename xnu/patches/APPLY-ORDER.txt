@@ -1,4 +1,3 @@
-# First-wave for CI (cuscoi board files preferred)
 0001-new-clang-drop-removed-auto-var-init-flag.patch
 0002-new-clang-backport-UIO_STACKBUF.patch
 0003-cuscoi-framebuffer-serial-console.patch

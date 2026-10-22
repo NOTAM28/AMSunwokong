@@ -12,8 +12,7 @@ jobs:
     runs-on: macos-14
     timeout-minutes: 180
     steps:
-      - name: Checkout Project-Ada
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
       - name: Fetch XNU (xnu-8796.101.5)
         run: |
@@ -27,40 +26,54 @@ jobs:
           chmod +x scripts/apply-patches.sh
           ./scripts/apply-patches.sh xnu-src xnu/patches
 
-      - name: Stub availability.pl (Xcode 15 SDK gap)
+      - name: Fix leftover sweet_early + seed cuscoi_early.h
+        working-directory: xnu-src
         run: |
           set -euo pipefail
-          SDKROOT=$(xcrun --sdk macosx --show-sdk-path)
-          DEST="$SDKROOT/usr/local/libexec"
-          echo "SDKROOT=$SDKROOT"
-          sudo mkdir -p "$DEST"
-          # Minimal generator so bsd/sys/_symbol_aliasing.h / _posix_availability.h can build
-          sudo tee "$DEST/availability.pl" > /dev/null << 'PL'
-          #!/usr/bin/perl
-          use strict;
-          use warnings;
-          # xnu 8796 SETUP calls this during header gen; CI SDK has no copy.
-          # Emit empty / minimal content so make can continue.
-          my $mode = "";
-          for my $a (@ARGV) {
-            $mode = "posix" if $a =~ /posix/i;
-            $mode = "alias" if $a =~ /alias/i || $a =~ /symbol/i;
-          }
-          if ($mode eq "posix") {
-            print "/* stub _posix_availability.h */\n";
-          } else {
-            print "/* stub _symbol_aliasing.h */\n";
-          }
-          PL
-          sudo chmod +x "$DEST/availability.pl"
-          ls -la "$DEST/availability.pl"
-          head -5 "$DEST/availability.pl"
+          # Any remaining sweet_early references → cuscoi_early
+          grep -RIl 'sweet_early' . 2>/dev/null | head -50 || true
+          find . -type f \( -name '*.h' -o -name '*.c' -o -name '*.cpp' -o -name 'Makefile*' -o -name '*.mk' -o -name 'MASTER*' \) \
+            -print0 2>/dev/null | xargs -0 grep -l 'sweet_early' 2>/dev/null | while read -r f; do
+            sed -i.bak 's/sweet_early/cuscoi_early/g' "$f" || true
+          done
+          mkdir -p osfmk/arm64
+          # Minimal early header so export_hdrs can proceed
+          if [ ! -f osfmk/arm64/cuscoi_early.h ]; then
+            cat > osfmk/arm64/cuscoi_early.h << 'H'
+          #ifndef _ARM64_CUSCOI_EARLY_H_
+          #define _ARM64_CUSCOI_EARLY_H_
+          /* cuscoi early bring-up stubs — filled by later patches */
+          #endif
+          H
+          fi
+          ls -la osfmk/arm64/*early* 2>/dev/null || true
+          grep -RIn 'sweet_early' . 2>/dev/null | head -20 || echo "no sweet_early left"
 
-      - name: Show toolchain
+      - name: Pre-generate availability headers (skip broken availability.pl)
+        working-directory: xnu-src
         run: |
-          sw_vers
-          xcodebuild -version || true
-          clang --version | head -2
+          set -euo pipefail
+          mkdir -p bsd/sys BUILD/obj/bsd/sys
+          # Empty-but-valid headers so make_symbol_aliasing is not required
+          cat > bsd/sys/_symbol_aliasing.h << 'H'
+          /* CI stub: symbol aliasing unavailable without SDK availability.pl */
+          H
+          cat > bsd/sys/_posix_availability.h << 'H'
+          /* CI stub: posix availability unavailable without SDK availability.pl */
+          H
+          # Also plant where BUILD expects copies
+          cp -f bsd/sys/_symbol_aliasing.h BUILD/obj/bsd/sys/ 2>/dev/null || true
+          cp -f bsd/sys/_posix_availability.h BUILD/obj/bsd/sys/ 2>/dev/null || true
+          # Neutralize the script so parallel makes don't clobber
+          if [ -f bsd/sys/make_symbol_aliasing.sh ]; then
+            cp bsd/sys/make_symbol_aliasing.sh bsd/sys/make_symbol_aliasing.sh.bak
+            cat > bsd/sys/make_symbol_aliasing.sh << 'SH'
+          #!/bin/bash
+          # no-op CI stub
+          exit 0
+          SH
+            chmod +x bsd/sys/make_symbol_aliasing.sh
+          fi
 
       - name: Build kernel DEVELOPMENT ARM64 CUSCOI
         working-directory: xnu-src
@@ -68,7 +81,6 @@ jobs:
           set -euo pipefail
           SDKROOT=$(xcrun --sdk macosx --show-sdk-path)
           export SDKROOT
-          echo "SDKROOT=$SDKROOT"
           make ARCH_CONFIGS=ARM64 KERNEL_CONFIGS=DEVELOPMENT MACHINE_CONFIGS=CUSCOI \
             SDKROOT="$SDKROOT" -j$(sysctl -n hw.ncpu) 2>&1 | tee ../build.log
 
@@ -77,16 +89,14 @@ jobs:
         run: |
           mkdir -p out
           cp -v build.log out/ 2>/dev/null || true
-          find xnu-src -type f \( -name 'kernel' -o -name 'kernel.*' \) 2>/dev/null | tee out/find.txt || true
-          find xnu-src/BUILD -type f -name 'kernel*' 2>/dev/null | head -50 | tee -a out/find.txt || true
+          find xnu-src -type f -name 'kernel*' 2>/dev/null | tee out/find.txt || true
           while IFS= read -r f; do
-            [ -f "$f" ] && [ -s "$f" ] && cp -v "$f" out/ || true
-          done < out/find.txt
+            [ -f "$f" ] && [ "$(wc -c < "$f")" -gt 1000000 ] && cp -v "$f" "out/$(basename "$f")"
+          done < out/find.txt || true
           ls -la out
 
-      - name: Upload artifact
+      - uses: actions/upload-artifact@v4
         if: always()
-        uses: actions/upload-artifact@v4
         with:
           name: kernel-cuscoi-ada
           path: out/
