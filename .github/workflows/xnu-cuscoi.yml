@@ -28,13 +28,14 @@ jobs:
           chmod +x scripts/apply-patches.sh
           ./scripts/apply-patches.sh xnu-src xnu/patches
 
-      - name: Prep board + clang noise
+      - name: Prep board + stubs
         working-directory: xnu-src
         run: |
           set -euo pipefail
           find . -type f \( -name '*.h' -o -name '*.c' -o -name '*.cpp' -o -name 'Makefile*' -o -name '*.mk' -o -name 'MASTER*' \) \
             -print0 2>/dev/null | xargs -0 grep -l 'sweet_early' 2>/dev/null \
             | while read -r f; do sed -i.bak 's/sweet_early/cuscoi_early/g' "$f" || true; done
+
           mkdir -p osfmk/arm64
           cat > osfmk/arm64/cuscoi_early.h << 'EH'
           #ifndef _ARM64_CUSCOI_EARLY_H_
@@ -51,7 +52,7 @@ jobs:
           #endif
           #endif
           EH
-          # Minimal PE that satisfies the Makefile object list
+
           mkdir -p iokit/Kernel/arm
           cat > iokit/Kernel/arm/SweetPlatformExpert.cpp << 'PE'
           #include <IOKit/IOLib.h>
@@ -74,44 +75,32 @@ jobs:
           cp -f bsd/sys/_symbol_aliasing.h bsd/sys/_posix_availability.h BUILD/obj/bsd/sys/ || true
           printf '#!/bin/bash\nexit 0\n' > bsd/sys/make_symbol_aliasing.sh
           chmod +x bsd/sys/make_symbol_aliasing.sh
+
           H=libkern/c++/OSMetaClass.h
           if [ -f "$H" ] && ! grep -q 'CI: xcode15' "$H"; then
-            { echo '/* CI: xcode15 */'; echo '#pragma clang diagnostic push';
-              echo '#pragma clang diagnostic ignored "-Wsuggest-override"';
-              echo '#pragma clang diagnostic ignored "-Wsuggest-destructor-override"';
-              cat "$H"; } > "$H.tmp" && mv "$H.tmp" "$H"
-          fi
-          # Keep filename SweetPlatformExpert.cpp (Makefile lists it); fix shadow only
-          if [ -f iokit/Kernel/arm/SweetPlatformExpert.cpp ]; then
-            sed -i.bak \
-              -e 's/processTopLevel(IORegistryEntry \*root)/processTopLevel(IORegistryEntry *rootEntry)/g' \
-              -e 's/processTopLevel(root)/processTopLevel(rootEntry)/g' \
-              iokit/Kernel/arm/SweetPlatformExpert.cpp || true
-            # only rename the *parameter* uses inside that function body carefully:
-            # if still fails, -Wshadow-field is ignored via pragma below
+            { echo '/* CI: xcode15 */'
+              echo '#pragma clang diagnostic push'
+              echo '#pragma clang diagnostic ignored "-Wsuggest-override"'
+              echo '#pragma clang diagnostic ignored "-Wsuggest-destructor-override"'
+              cat "$H"
+            } > "$H.tmp" && mv "$H.tmp" "$H"
           fi
 
-
-          # Closed-source libsystem header stub (firehose)
-          mkdir -p libkern/os bsd/sys/os
+          # firehose: macros only (types already in firehose_types_private.h)
+          mkdir -p libkern/os BUILD/obj/EXPORT_HDRS/libkern/os BUILD/obj/EXPORT_HDRS/os
           cat > libkern/os/firehose_buffer_private.h << 'FH'
-#ifndef _OS_FIREHOSE_BUFFER_PRIVATE_H_
-#define _OS_FIREHOSE_BUFFER_PRIVATE_H_
-/* Do NOT redefine firehose_buffer_t — firehose_types_private.h owns it */
-#ifndef FIREHOSE_BUFFER_KERNEL_DEFAULT_CHUNK_COUNT
-#define FIREHOSE_BUFFER_KERNEL_DEFAULT_CHUNK_COUNT 64
-#endif
-#ifndef FIREHOSE_BUFFER_KERNEL_DEFAULT_IO_PAGES
-#define FIREHOSE_BUFFER_KERNEL_DEFAULT_IO_PAGES 4
-#endif
-#endif
-FH
-          mkdir -p BUILD/obj/EXPORT_HDRS/os BUILD/obj/EXPORT_HDRS/libkern/os
+          #ifndef _OS_FIREHOSE_BUFFER_PRIVATE_H_
+          #define _OS_FIREHOSE_BUFFER_PRIVATE_H_
+          #ifndef FIREHOSE_BUFFER_KERNEL_DEFAULT_CHUNK_COUNT
+          #define FIREHOSE_BUFFER_KERNEL_DEFAULT_CHUNK_COUNT 64
+          #endif
+          #ifndef FIREHOSE_BUFFER_KERNEL_DEFAULT_IO_PAGES
+          #define FIREHOSE_BUFFER_KERNEL_DEFAULT_IO_PAGES 4
+          #endif
+          #endif
+          FH
+          cp -f libkern/os/firehose_buffer_private.h BUILD/obj/EXPORT_HDRS/libkern/os/
           cp -f libkern/os/firehose_buffer_private.h BUILD/obj/EXPORT_HDRS/os/ 2>/dev/null || true
-          cp -f libkern/os/firehose_buffer_private.h BUILD/obj/EXPORT_HDRS/libkern/os/ 2>/dev/null || true
-          # Also under SDK-style include path used by some TUs
-          mkdir -p os
-          cp -f libkern/os/firehose_buffer_private.h os/ 2>/dev/null || true
 
       - name: Build
         working-directory: xnu-src
@@ -132,21 +121,18 @@ FH
           #pragma clang diagnostic ignored "-Wshadow-field"
           #pragma clang diagnostic ignored "-Wnull-pointer-subtraction"
           #pragma clang diagnostic ignored "-Wvoid-pointer-to-int-cast"
+          #pragma clang diagnostic ignored "-Wpointer-to-int-cast"
           #pragma clang diagnostic ignored "-Wcast-align"
           #pragma clang diagnostic ignored "-Wshorten-64-to-32"
           #pragma clang diagnostic ignored "-Wsign-compare"
           #pragma clang diagnostic ignored "-Wunused-function"
-          #pragma clang diagnostic ignored "-Wfour-char-constants"
-          #pragma clang diagnostic ignored "-Wabsolute-value"
-          #pragma clang diagnostic ignored "-Wimplicit-function-declaration"
-          #pragma clang diagnostic ignored "-Wtautological-compare"
-          #pragma clang diagnostic ignored "-Wtautological-value-range-compare"
-          #pragma clang diagnostic ignored "-Wpointer-to-int-cast"
           #pragma clang diagnostic ignored "-Wsingle-bit-bitfield-constant-conversion"
           #pragma clang diagnostic ignored "-Wbitfield-constant-conversion"
           #pragma clang diagnostic ignored "-Wenum-conversion"
-          #pragma clang diagnostic ignored "-Wformat"
-          #pragma clang diagnostic ignored "-Wunreachable-code"
+          #pragma clang diagnostic ignored "-Wtautological-value-range-compare"
+          #pragma clang diagnostic ignored "-Wtautological-compare"
+          #pragma clang diagnostic ignored "-Wfour-char-constants"
+          #pragma clang diagnostic ignored "-Wimplicit-function-declaration"
           H
           REAL_CLANG=$(xcrun -f clang)
           REAL_CXX=$(xcrun -f clang++)
