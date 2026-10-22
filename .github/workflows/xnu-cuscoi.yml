@@ -81,14 +81,40 @@ jobs:
           set -euo pipefail
           SDKROOT=$(xcrun --sdk macosx --show-sdk-path)
           export SDKROOT
-          # Kernel compile only — do NOT export CFLAGS (breaks SETUP host tools)
-          WARNFLAGS="-Wno-error=suggest-override -Wno-error=suggest-destructor-override"
-          WARNFLAGS="$WARNFLAGS -Wno-error=unused-but-set-variable -Wno-error=unused-variable"
-          WARNFLAGS="$WARNFLAGS -Wno-error=deprecated-declarations -Wno-error=declaration-after-statement"
+          # Wrapper: demote Xcode15 -Werror noise without polluting include paths
+          mkdir -p "$GITHUB_WORKSPACE/ci-bin"
+          REAL_CLANG=$(xcrun -f clang)
+          REAL_CXX=$(xcrun -f clang++)
+          cat > "$GITHUB_WORKSPACE/ci-bin/clang" << EOF
+          #!/bin/bash
+          exec "$REAL_CLANG" \
+            -Wno-error=suggest-override \
+            -Wno-error=suggest-destructor-override \
+            -Wno-error=unused-but-set-variable \
+            -Wno-error=unused-variable \
+            -Wno-error=deprecated-declarations \
+            -Wno-error=declaration-after-statement \
+            "\$@"
+          EOF
+          cat > "$GITHUB_WORKSPACE/ci-bin/clang++" << EOF
+          #!/bin/bash
+          exec "$REAL_CXX" \
+            -Wno-error=suggest-override \
+            -Wno-error=suggest-destructor-override \
+            -Wno-error=unused-but-set-variable \
+            -Wno-error=unused-variable \
+            -Wno-error=deprecated-declarations \
+            -Wno-error=declaration-after-statement \
+            "\$@"
+          EOF
+          chmod +x "$GITHUB_WORKSPACE/ci-bin/clang" "$GITHUB_WORKSPACE/ci-bin/clang++"
+          export PATH="$GITHUB_WORKSPACE/ci-bin:$PATH"
+          hash -r
+          which clang; clang --version | head -1
           make ARCH_CONFIGS=ARM64 KERNEL_CONFIGS=DEVELOPMENT MACHINE_CONFIGS=CUSCOI \
             SDKROOT="$SDKROOT" \
-            KCFLAGS="$WARNFLAGS" \
             -j$(sysctl -n hw.ncpu) 2>&1 | tee ../build.log
+
 
 
       - name: Collect outputs
