@@ -81,8 +81,15 @@ jobs:
           set -euo pipefail
           SDKROOT=$(xcrun --sdk macosx --show-sdk-path)
           export SDKROOT
+          # Xcode 15 clang is stricter than xnu-8796; demote known noise to warnings
+          WARNFLAGS="-Wno-error=suggest-override -Wno-error=suggest-destructor-override"
+          WARNFLAGS="$WARNFLAGS -Wno-error=unused-but-set-variable -Wno-error=unused-variable"
+          WARNFLAGS="$WARNFLAGS -Wno-error=deprecated-declarations -Wno-error=declaration-after-statement"
           make ARCH_CONFIGS=ARM64 KERNEL_CONFIGS=DEVELOPMENT MACHINE_CONFIGS=CUSCOI \
-            SDKROOT="$SDKROOT" -j$(sysctl -n hw.ncpu) 2>&1 | tee ../build.log
+            SDKROOT="$SDKROOT" \
+            KCFLAGS="$WARNFLAGS" CFLAGS="$WARNFLAGS" CXXFLAGS="$WARNFLAGS" \
+            OTHER_CFLAGS="$WARNFLAGS" OTHER_CXXFLAGS="$WARNFLAGS" \
+            -j$(sysctl -n hw.ncpu) 2>&1 | tee ../build.log
 
       - name: Collect outputs
         if: always()
