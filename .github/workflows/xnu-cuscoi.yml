@@ -26,53 +26,50 @@ jobs:
           chmod +x scripts/apply-patches.sh
           ./scripts/apply-patches.sh xnu-src xnu/patches
 
-      - name: Fix leftover sweet_early + seed cuscoi_early.h
+      - name: Fix sweet leftovers + availability stubs
         working-directory: xnu-src
         run: |
           set -euo pipefail
-          # Any remaining sweet_early references → cuscoi_early
-          grep -RIl 'sweet_early' . 2>/dev/null | head -50 || true
           find . -type f \( -name '*.h' -o -name '*.c' -o -name '*.cpp' -o -name 'Makefile*' -o -name '*.mk' -o -name 'MASTER*' \) \
-            -print0 2>/dev/null | xargs -0 grep -l 'sweet_early' 2>/dev/null | while read -r f; do
-            sed -i.bak 's/sweet_early/cuscoi_early/g' "$f" || true
-          done
+            -print0 2>/dev/null | xargs -0 grep -l 'sweet_early' 2>/dev/null \
+            | while read -r f; do sed -i.bak 's/sweet_early/cuscoi_early/g' "$f" || true; done
           mkdir -p osfmk/arm64
-          # Minimal early header so export_hdrs can proceed
           if [ ! -f osfmk/arm64/cuscoi_early.h ]; then
-            cat > osfmk/arm64/cuscoi_early.h << 'H'
-          #ifndef _ARM64_CUSCOI_EARLY_H_
-          #define _ARM64_CUSCOI_EARLY_H_
-          /* cuscoi early bring-up stubs — filled by later patches */
-          #endif
-          H
+            printf '%s\n' '#ifndef _ARM64_CUSCOI_EARLY_H_' '#define _ARM64_CUSCOI_EARLY_H_' '#endif' \
+              > osfmk/arm64/cuscoi_early.h
           fi
-          ls -la osfmk/arm64/*early* 2>/dev/null || true
-          grep -RIn 'sweet_early' . 2>/dev/null | head -20 || echo "no sweet_early left"
+          mkdir -p bsd/sys BUILD/obj/bsd/sys
+          echo '/* CI stub */' > bsd/sys/_symbol_aliasing.h
+          echo '/* CI stub */' > bsd/sys/_posix_availability.h
+          cp -f bsd/sys/_symbol_aliasing.h bsd/sys/_posix_availability.h BUILD/obj/bsd/sys/ 2>/dev/null || true
+          if [ -f bsd/sys/make_symbol_aliasing.sh ]; then
+            printf '#!/bin/bash\nexit 0\n' > bsd/sys/make_symbol_aliasing.sh
+            chmod +x bsd/sys/make_symbol_aliasing.sh
+          fi
 
-      - name: Pre-generate availability headers (skip broken availability.pl)
+      - name: Source fixes for Xcode 15 -Werror
         working-directory: xnu-src
         run: |
           set -euo pipefail
-          mkdir -p bsd/sys BUILD/obj/bsd/sys
-          # Empty-but-valid headers so make_symbol_aliasing is not required
-          cat > bsd/sys/_symbol_aliasing.h << 'H'
-          /* CI stub: symbol aliasing unavailable without SDK availability.pl */
-          H
-          cat > bsd/sys/_posix_availability.h << 'H'
-          /* CI stub: posix availability unavailable without SDK availability.pl */
-          H
-          # Also plant where BUILD expects copies
-          cp -f bsd/sys/_symbol_aliasing.h BUILD/obj/bsd/sys/ 2>/dev/null || true
-          cp -f bsd/sys/_posix_availability.h BUILD/obj/bsd/sys/ 2>/dev/null || true
-          # Neutralize the script so parallel makes don't clobber
-          if [ -f bsd/sys/make_symbol_aliasing.sh ]; then
-            cp bsd/sys/make_symbol_aliasing.sh bsd/sys/make_symbol_aliasing.sh.bak
-            cat > bsd/sys/make_symbol_aliasing.sh << 'SH'
-          #!/bin/bash
-          # no-op CI stub
-          exit 0
-          SH
-            chmod +x bsd/sys/make_symbol_aliasing.sh
+          # Unused-but-set in IOUserServer / vfs_cache
+          if [ -f iokit/Kernel/IOUserServer.cpp ]; then
+            sed -i.bak -E 's/\b(uint64_t|unsigned long long|mach_msg_id_t)[[:space:]]+(msgid)\b/\1 \2 __attribute__((unused))/g' \
+              iokit/Kernel/IOUserServer.cpp || true
+            sed -i.bak -E 's/\b(uint64_t|unsigned long long|mach_port_t)[[:space:]]+(machid)\b/\1 \2 __attribute__((unused))/g' \
+              iokit/Kernel/IOUserServer.cpp || true
+          fi
+          if [ -f bsd/vfs/vfs_cache.c ]; then
+            sed -i.bak -E 's/\b(int|unsigned|u_int|size_t)[[:space:]]+(chain_len)\b/\1 \2 __attribute__((unused))/g' \
+              bsd/vfs/vfs_cache.c || true
+          fi
+          # OSMetaClass: ignore suggest-override for this TU tree via pragma at top of header
+          H=libkern/c++/OSMetaClass.h
+          if [ -f "$H" ] && ! grep -q 'CI: xcode15 werror' "$H"; then
+            { echo '/* CI: xcode15 werror */';
+              echo '#pragma clang diagnostic push';
+              echo '#pragma clang diagnostic ignored "-Wsuggest-override"';
+              echo '#pragma clang diagnostic ignored "-Wsuggest-destructor-override"';
+              cat "$H"; } > "$H.tmp" && mv "$H.tmp" "$H"
           fi
 
       - name: Build kernel DEVELOPMENT ARM64 CUSCOI
@@ -81,41 +78,24 @@ jobs:
           set -euo pipefail
           SDKROOT=$(xcrun --sdk macosx --show-sdk-path)
           export SDKROOT
-          # Wrapper: demote Xcode15 -Werror noise without polluting include paths
-          mkdir -p "$GITHUB_WORKSPACE/ci-bin"
-          REAL_CLANG=$(xcrun -f clang)
-          REAL_CXX=$(xcrun -f clang++)
-          cat > "$GITHUB_WORKSPACE/ci-bin/clang" << EOF
-          #!/bin/bash
-          exec "$REAL_CLANG" \
-            -Wno-error=suggest-override \
-            -Wno-error=suggest-destructor-override \
-            -Wno-error=unused-but-set-variable \
-            -Wno-error=unused-variable \
-            -Wno-error=deprecated-declarations \
-            -Wno-error=declaration-after-statement \
-            "\$@"
-          EOF
-          cat > "$GITHUB_WORKSPACE/ci-bin/clang++" << EOF
-          #!/bin/bash
-          exec "$REAL_CXX" \
-            -Wno-error=suggest-override \
-            -Wno-error=suggest-destructor-override \
-            -Wno-error=unused-but-set-variable \
-            -Wno-error=unused-variable \
-            -Wno-error=deprecated-declarations \
-            -Wno-error=declaration-after-statement \
-            "\$@"
-          EOF
-          chmod +x "$GITHUB_WORKSPACE/ci-bin/clang" "$GITHUB_WORKSPACE/ci-bin/clang++"
-          export PATH="$GITHUB_WORKSPACE/ci-bin:$PATH"
-          hash -r
-          which clang; clang --version | head -1
+          # Force-include on every compile (XNU uses absolute clang paths; PATH wrappers fail)
+          OFF="$GITHUB_WORKSPACE/ci-werror-off.h"
+          cat > "$OFF" << 'H'
+          #pragma clang diagnostic ignored "-Wsuggest-override"
+          #pragma clang diagnostic ignored "-Wsuggest-destructor-override"
+          #pragma clang diagnostic ignored "-Wunused-but-set-variable"
+          #pragma clang diagnostic ignored "-Wunused-variable"
+          #pragma clang diagnostic ignored "-Wdeprecated-declarations"
+          #pragma clang diagnostic ignored "-Wdeclaration-after-statement"
+          H
+          CLANG=$(xcrun -f clang)
+          CLANGXX=$(xcrun -f clang++)
           make ARCH_CONFIGS=ARM64 KERNEL_CONFIGS=DEVELOPMENT MACHINE_CONFIGS=CUSCOI \
             SDKROOT="$SDKROOT" \
+            CC="$CLANG -include $OFF" \
+            CXX="$CLANGXX -include $OFF" \
+            CPP="$CLANG -E -include $OFF" \
             -j$(sysctl -n hw.ncpu) 2>&1 | tee ../build.log
-
-
 
       - name: Collect outputs
         if: always()
@@ -124,9 +104,13 @@ jobs:
           cp -v build.log out/ 2>/dev/null || true
           find xnu-src -type f -name 'kernel*' 2>/dev/null | tee out/find.txt || true
           while IFS= read -r f; do
-            [ -f "$f" ] && [ "$(wc -c < "$f")" -gt 1000000 ] && cp -v "$f" "out/$(basename "$f")"
+            [ -f "$f" ] || continue
+            sz=$(wc -c < "$f" | tr -d ' ')
+            [ "$sz" -gt 1000000 ] && cp -v "$f" "out/$(basename "$f")"
           done < out/find.txt || true
           ls -la out
+          echo "---- errors (if any) ----"
+          grep -E 'error:|fatal error:' build.log | grep -v warning | head -40 || true
 
       - uses: actions/upload-artifact@v4
         if: always()
