@@ -56,21 +56,15 @@ jobs:
           cat > iokit/Kernel/arm/SweetPlatformExpert.cpp << 'PE'
           #include <IOKit/IOLib.h>
           #include <IOKit/IOPlatformExpert.h>
-          #include <IOKit/IODeviceTreeSupport.h>
           class SweetPlatformExpert : public IOPlatformExpert {
               OSDeclareDefaultStructors(SweetPlatformExpert)
           public:
               virtual bool start(IOService *provider) APPLE_KEXT_OVERRIDE;
-              virtual void processTopLevel(IORegistryEntry *rootEntry);
           };
           OSDefineMetaClassAndStructors(SweetPlatformExpert, IOPlatformExpert)
           bool SweetPlatformExpert::start(IOService *provider)
           {
-              return super::start(provider);
-          }
-          void SweetPlatformExpert::processTopLevel(IORegistryEntry *rootEntry)
-          {
-              (void)rootEntry;
+              return IOPlatformExpert::start(provider);
           }
           PE
 
@@ -96,6 +90,34 @@ jobs:
             # only rename the *parameter* uses inside that function body carefully:
             # if still fails, -Wshadow-field is ignored via pragma below
           fi
+
+
+          # Closed-source libsystem header stub (firehose)
+          mkdir -p libkern/os bsd/sys/os
+          cat > libkern/os/firehose_buffer_private.h << 'FH'
+          #ifndef _OS_FIREHOSE_BUFFER_PRIVATE_H_
+          #define _OS_FIREHOSE_BUFFER_PRIVATE_H_
+          #include <stdint.h>
+          #include <stddef.h>
+          #ifdef __cplusplus
+          extern "C" {
+          #endif
+          typedef struct firehose_buffer_s *firehose_buffer_t;
+          typedef struct firehose_chunk_s *firehose_chunk_t;
+          static inline void *firehose_buffer_get_kernel(void) { return NULL; }
+          static inline int firehose_buffer_tracepoint_reserve(void *a, ...) { (void)a; return 0; }
+          static inline void firehose_buffer_tracepoint_flush(void *a, ...) { (void)a; }
+          #ifdef __cplusplus
+          }
+          #endif
+          #endif
+          FH
+          mkdir -p BUILD/obj/EXPORT_HDRS/os BUILD/obj/EXPORT_HDRS/libkern/os
+          cp -f libkern/os/firehose_buffer_private.h BUILD/obj/EXPORT_HDRS/os/ 2>/dev/null || true
+          cp -f libkern/os/firehose_buffer_private.h BUILD/obj/EXPORT_HDRS/libkern/os/ 2>/dev/null || true
+          # Also under SDK-style include path used by some TUs
+          mkdir -p os
+          cp -f libkern/os/firehose_buffer_private.h os/ 2>/dev/null || true
 
       - name: Build
         working-directory: xnu-src
