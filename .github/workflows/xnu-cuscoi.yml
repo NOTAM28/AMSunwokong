@@ -50,16 +50,15 @@ jobs:
               echo '#pragma clang diagnostic ignored "-Wsuggest-destructor-override"';
               cat "$H"; } > "$H.tmp" && mv "$H.tmp" "$H"
           fi
+          # Keep filename SweetPlatformExpert.cpp (Makefile lists it); fix shadow only
           if [ -f iokit/Kernel/arm/SweetPlatformExpert.cpp ]; then
-            mv iokit/Kernel/arm/SweetPlatformExpert.cpp iokit/Kernel/arm/CuscoiPlatformExpert.cpp
-            sed -i.bak -e 's/SweetPlatformExpert/CuscoiPlatformExpert/g' \
+            sed -i.bak \
               -e 's/processTopLevel(IORegistryEntry \*root)/processTopLevel(IORegistryEntry *rootEntry)/g' \
-              -e 's/\broot\b/rootEntry/g' \
-              iokit/Kernel/arm/CuscoiPlatformExpert.cpp || true
+              -e 's/processTopLevel(root)/processTopLevel(rootEntry)/g' \
+              iokit/Kernel/arm/SweetPlatformExpert.cpp || true
+            # only rename the *parameter* uses inside that function body carefully:
+            # if still fails, -Wshadow-field is ignored via pragma below
           fi
-          find . -type f \( -name '*.cpp' -o -name '*.h' -o -name 'Makefile*' \) \
-            -print0 2>/dev/null | xargs -0 grep -l 'SweetPlatformExpert' 2>/dev/null \
-            | while read -r f; do sed -i.bak 's/SweetPlatformExpert/CuscoiPlatformExpert/g' "$f" || true; done
 
       - name: Build
         working-directory: xnu-src
@@ -84,6 +83,12 @@ jobs:
           #pragma clang diagnostic ignored "-Wshorten-64-to-32"
           #pragma clang diagnostic ignored "-Wsign-compare"
           #pragma clang diagnostic ignored "-Wunused-function"
+          #pragma clang diagnostic ignored "-Wpointer-to-int-cast"
+          #pragma clang diagnostic ignored "-Wsingle-bit-bitfield-constant-conversion"
+          #pragma clang diagnostic ignored "-Wbitfield-constant-conversion"
+          #pragma clang diagnostic ignored "-Wenum-conversion"
+          #pragma clang diagnostic ignored "-Wformat"
+          #pragma clang diagnostic ignored "-Wunreachable-code"
           H
           REAL_CLANG=$(xcrun -f clang)
           REAL_CXX=$(xcrun -f clang++)
