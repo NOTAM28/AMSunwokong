@@ -18,17 +18,43 @@ jobs:
       - name: Fetch XNU (xnu-8796.101.5)
         run: |
           set -euo pipefail
-          # Tag exists on apple-oss-distributions/xnu (iOS 16-era family)
           git clone --depth 1 --branch xnu-8796.101.5 \
             https://github.com/apple-oss-distributions/xnu.git xnu-src
-          cd xnu-src
-          git log -1 --oneline
-          ls | head
+          cd xnu-src && git log -1 --oneline
 
       - name: Apply first-wave patches
         run: |
           chmod +x scripts/apply-patches.sh
           ./scripts/apply-patches.sh xnu-src xnu/patches
+
+      - name: Stub availability.pl (Xcode 15 SDK gap)
+        run: |
+          set -euo pipefail
+          SDKROOT=$(xcrun --sdk macosx --show-sdk-path)
+          DEST="$SDKROOT/usr/local/libexec"
+          echo "SDKROOT=$SDKROOT"
+          sudo mkdir -p "$DEST"
+          # Minimal generator so bsd/sys/_symbol_aliasing.h / _posix_availability.h can build
+          sudo tee "$DEST/availability.pl" > /dev/null << 'PL'
+          #!/usr/bin/perl
+          use strict;
+          use warnings;
+          # xnu 8796 SETUP calls this during header gen; CI SDK has no copy.
+          # Emit empty / minimal content so make can continue.
+          my $mode = "";
+          for my $a (@ARGV) {
+            $mode = "posix" if $a =~ /posix/i;
+            $mode = "alias" if $a =~ /alias/i || $a =~ /symbol/i;
+          }
+          if ($mode eq "posix") {
+            print "/* stub _posix_availability.h */\n";
+          } else {
+            print "/* stub _symbol_aliasing.h */\n";
+          }
+          PL
+          sudo chmod +x "$DEST/availability.pl"
+          ls -la "$DEST/availability.pl"
+          head -5 "$DEST/availability.pl"
 
       - name: Show toolchain
         run: |
@@ -36,35 +62,30 @@ jobs:
           xcodebuild -version || true
           clang --version | head -2
 
-      - name: Build kernel (best-effort)
+      - name: Build kernel DEVELOPMENT ARM64 CUSCOI
         working-directory: xnu-src
         run: |
-          set +e
+          set -euo pipefail
           SDKROOT=$(xcrun --sdk macosx --show-sdk-path)
           export SDKROOT
           echo "SDKROOT=$SDKROOT"
           make ARCH_CONFIGS=ARM64 KERNEL_CONFIGS=DEVELOPMENT MACHINE_CONFIGS=CUSCOI \
             SDKROOT="$SDKROOT" -j$(sysctl -n hw.ncpu) 2>&1 | tee ../build.log
-          status=${PIPESTATUS[0]}
-          if [ "$status" -ne 0 ]; then
-            echo "CUSCOI build failed ($status); retry without MACHINE_CONFIGS"
-            make ARCH_CONFIGS=ARM64 KERNEL_CONFIGS=DEVELOPMENT \
-              SDKROOT="$SDKROOT" -j$(sysctl -n hw.ncpu) 2>&1 | tee -a ../build.log
-          fi
-          tail -100 ../build.log
-          # do not fail the job solely on make yet — collect logs
-          exit 0
 
       - name: Collect outputs
+        if: always()
         run: |
           mkdir -p out
           cp -v build.log out/ 2>/dev/null || true
-          find xnu-src -type f \( -name 'kernel*' -o -path '*/BUILD/*' \) 2>/dev/null \
-            | head -100 | tee out/find.txt || true
-          find xnu-src -type f -name 'kernel*' -size +1M -exec cp -v {} out/ \; 2>/dev/null || true
+          find xnu-src -type f \( -name 'kernel' -o -name 'kernel.*' \) 2>/dev/null | tee out/find.txt || true
+          find xnu-src/BUILD -type f -name 'kernel*' 2>/dev/null | head -50 | tee -a out/find.txt || true
+          while IFS= read -r f; do
+            [ -f "$f" ] && [ -s "$f" ] && cp -v "$f" out/ || true
+          done < out/find.txt
           ls -la out
 
       - name: Upload artifact
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: kernel-cuscoi-ada
