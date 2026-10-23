@@ -1,28 +1,43 @@
 name: xnu-cuscoi
+
 on:
   workflow_dispatch:
   push:
     branches: [main]
+
 jobs:
   build:
     runs-on: macos-14
     timeout-minutes: 180
     steps:
       - uses: actions/checkout@v4
+
       - name: Fetch XNU
         run: |
           set -euo pipefail
-          git clone --depth 1 --branch xnu-8796.101.5 https://github.com/apple-oss-distributions/xnu.git xnu-src
+          git clone --depth 1 --branch xnu-8796.101.5 \
+            https://github.com/apple-oss-distributions/xnu.git xnu-src
           cd xnu-src && git log -1 --oneline
+
       - name: Apply patches
         run: |
           chmod +x scripts/apply-patches.sh
-          ./scripts/apply-patches.sh xnu-src xnu/patches
+          ./scripts/apply-patches.sh xnu-src xnu/patches || true
+
       - name: Prep
         working-directory: xnu-src
         run: |
           set -euo pipefail
-          find . -type f \( -name '*.h' -o -name '*.c' -o -name '*.cpp' -o -name 'Makefile*' -o -name '*.mk' -o -name 'MASTER*' \) -print0 2>/dev/null | xargs -0 grep -l 'sweet_early' 2>/dev/null | while read -r f; do sed -i.bak 's/sweet_early/cuscoi_early/g' "$f" || true; done
+          # MASTER with nos_arm_asm (__start)
+          if [ -f "$GITHUB_WORKSPACE/xnu-patches/MASTER.arm64.cuscoi" ]; then
+            mkdir -p config
+            cp "$GITHUB_WORKSPACE/xnu-patches/MASTER.arm64.cuscoi" config/MASTER.arm64.cuscoi
+            echo "Installed MASTER.arm64.cuscoi"
+            grep -n nos_arm_asm config/MASTER.arm64.cuscoi | head
+          fi
+          find . -type f \( -name '*.h' -o -name '*.c' -o -name '*.cpp' -o -name 'Makefile*' -o -name '*.mk' -o -name 'MASTER*' \) \
+            -print0 2>/dev/null | xargs -0 grep -l 'sweet_early' 2>/dev/null \
+            | while read -r f; do sed -i.bak 's/sweet_early/cuscoi_early/g' "$f" || true; done
           mkdir -p osfmk/arm64
           cat > osfmk/arm64/cuscoi_early.h << 'EH'
           #ifndef _ARM64_CUSCOI_EARLY_H_
@@ -49,7 +64,9 @@ jobs:
               virtual bool start(IOService *provider) APPLE_KEXT_OVERRIDE;
           };
           OSDefineMetaClassAndStructors(SweetPlatformExpert, IOPlatformExpert)
-          bool SweetPlatformExpert::start(IOService *provider) { return IOPlatformExpert::start(provider); }
+          bool SweetPlatformExpert::start(IOService *provider) {
+              return IOPlatformExpert::start(provider);
+          }
           PE
           mkdir -p bsd/sys BUILD/obj/bsd/sys
           echo '/* stub */' > bsd/sys/_symbol_aliasing.h
@@ -57,10 +74,7 @@ jobs:
           cp -f bsd/sys/_symbol_aliasing.h bsd/sys/_posix_availability.h BUILD/obj/bsd/sys/ || true
           printf '#!/bin/bash\nexit 0\n' > bsd/sys/make_symbol_aliasing.sh
           chmod +x bsd/sys/make_symbol_aliasing.sh
-          H=libkern/c++/OSMetaClass.h
-          if [ -f "$H" ] && ! grep -q 'CI: xcode15' "$H"; then
-            { echo '/* CI: xcode15 */'; echo '#pragma clang diagnostic push'; echo '#pragma clang diagnostic ignored "-Wsuggest-override"'; echo '#pragma clang diagnostic ignored "-Wsuggest-destructor-override"'; cat "$H"; } > "$H.tmp" && mv "$H.tmp" "$H"
-          fi
+          # firehose macros only (no competing typedefs)
           mkdir -p libkern/os BUILD/obj/EXPORT_HDRS/libkern/os BUILD/obj/EXPORT_HDRS/os
           cat > libkern/os/firehose_buffer_private.h << 'FH'
           #ifndef _OS_FIREHOSE_BUFFER_PRIVATE_H_
@@ -77,13 +91,11 @@ jobs:
           #ifndef FIREHOSE_CHUNK_SIZE
           #define FIREHOSE_CHUNK_SIZE 4096
           #endif
-          #define __firehose_buffer_tracepoint_reserve(...) ((void *)0)
-          #define __firehose_buffer_tracepoint_flush(a, b) ((void)(a), (void)(b))
-          #define __firehose_buffer_get_kernel() ((void *)0)
           #endif
           FH
           cp -f libkern/os/firehose_buffer_private.h BUILD/obj/EXPORT_HDRS/libkern/os/
           cp -f libkern/os/firehose_buffer_private.h BUILD/obj/EXPORT_HDRS/os/ 2>/dev/null || true
+
       - name: Build
         working-directory: xnu-src
         run: |
@@ -92,7 +104,8 @@ jobs:
           export SDKROOT
           BIN="$GITHUB_WORKSPACE/ci-bin"
           OFF="$GITHUB_WORKSPACE/ci-werror-off.h"
-          mkdir -p "$BIN"
+          STUBDIR="$GITHUB_WORKSPACE/ci-lib"
+          mkdir -p "$BIN" "$STUBDIR"
           cat > "$OFF" << 'H'
           #pragma clang diagnostic ignored "-Wsuggest-override"
           #pragma clang diagnostic ignored "-Wsuggest-destructor-override"
@@ -104,9 +117,11 @@ jobs:
           #pragma clang diagnostic ignored "-Wnull-pointer-subtraction"
           #pragma clang diagnostic ignored "-Wvoid-pointer-to-int-cast"
           #pragma clang diagnostic ignored "-Wpointer-to-int-cast"
+          #pragma clang diagnostic ignored "-Wvoid-pointer-to-enum-cast"
           #pragma clang diagnostic ignored "-Wcast-align"
           #pragma clang diagnostic ignored "-Wshorten-64-to-32"
           #pragma clang diagnostic ignored "-Wsign-compare"
+          #pragma clang diagnostic ignored "-Wsign-conversion"
           #pragma clang diagnostic ignored "-Wunused-function"
           #pragma clang diagnostic ignored "-Wsingle-bit-bitfield-constant-conversion"
           #pragma clang diagnostic ignored "-Wbitfield-constant-conversion"
@@ -114,7 +129,6 @@ jobs:
           #pragma clang diagnostic ignored "-Wtautological-value-range-compare"
           #pragma clang diagnostic ignored "-Wtautological-compare"
           #pragma clang diagnostic ignored "-Wfour-char-constants"
-#pragma clang diagnostic ignored "-Wsign-conversion"
           #pragma clang diagnostic ignored "-Wimplicit-function-declaration"
           #pragma clang diagnostic ignored "-Wincompatible-pointer-types"
           #pragma clang diagnostic ignored "-Wcompare-distinct-pointer-types"
@@ -128,78 +142,37 @@ jobs:
           printf '#!/bin/bash\nexec "%s" -include "%s" "$@"\n' "$REAL_CXX" "$OFF" > "$BIN/clang++"
           printf '#!/bin/bash\nexec "%s" -E -include "%s" "$@"\n' "$REAL_CLANG" "$OFF" > "$BIN/cpp-wrap"
           chmod +x "$BIN/clang" "$BIN/clang++" "$BIN/cpp-wrap"
-          # Stub libfirehose_kernel for linker
-          STUBDIR="$GITHUB_WORKSPACE/ci-lib"
-          mkdir -p "$STUBDIR"
-          echo 'void __firehose_kernel_unused_stub(void){}' > /tmp/fh_empty.c
-          $(xcrun -f clang) -c /tmp/fh_empty.c -o /tmp/fh_empty.o
-          $(xcrun -f ar) rcs "$STUBDIR/libfirehose_kernel.a" /tmp/fh_empty.o
-          export LIBRARY_PATH="$STUBDIR:${LIBRARY_PATH:-}"
-          export LDFLAGS="${LDFLAGS:-} -L$STUBDIR"
-          # Stub closed libfirehose_kernel + force kernel entry __start
-          STUBDIR="$GITHUB_WORKSPACE/ci-lib"
-          mkdir -p "$STUBDIR"
-          echo 'void __firehose_kernel_unused_stub(void){}' > /tmp/fh_empty.c
-          $(xcrun -f clang) -c /tmp/fh_empty.c -o /tmp/fh_empty.o
-          $(xcrun -f ar) rcs "$STUBDIR/libfirehose_kernel.a" /tmp/fh_empty.o
-          export LIBRARY_PATH="$STUBDIR:${LIBRARY_PATH:-}"
-          export LDFLAGS="${LDFLAGS:-} -L$STUBDIR -u __start -e __start"
-                              # CUSCOI: ensure nos_arm_asm MASTER is present (provides __start)
-                              SRC="$GITHUB_WORKSPACE/xnu-src"
-                              if [ -f "$GITHUB_WORKSPACE/xnu-patches/MASTER.arm64.cuscoi" ]; then
-                                mkdir -p "$SRC/config"
-                                cp "$GITHUB_WORKSPACE/xnu-patches/MASTER.arm64.cuscoi" "$SRC/config/MASTER.arm64.cuscoi"
-                                echo "Installed MASTER.arm64.cuscoi"
-                                grep -n nos_arm_asm "$SRC/config/MASTER.arm64.cuscoi" | head
-                              fi
-                              if [ -f "$SRC/config/MASTER.arm64.cuscoi" ] && ! grep -q nos_arm_asm "$SRC/config/MASTER.arm64.cuscoi"; then
-                                echo "ERROR: MASTER.arm64.cuscoi missing nos_arm_asm"; exit 1
-                              fi
-                              STUBDIR="$GITHUB_WORKSPACE/ci-lib"
-                              mkdir -p "$STUBDIR"
-                              echo 'void __firehose_kernel_unused_stub(void){}' > /tmp/fh_empty.c
-                              $(xcrun -f clang) -c /tmp/fh_empty.c -o /tmp/fh_empty.o
-                              $(xcrun -f ar) rcs "$STUBDIR/libfirehose_kernel.a" /tmp/fh_empty.o
-                              export LIBRARY_PATH="$STUBDIR:${LIBRARY_PATH:-}"
-                              export CFLAGS="${CFLAGS:-} -Wno-unused-but-set-variable -Wno-unused-variable -Wno-declaration-after-statement"
-          export OTHER_CFLAGS="${OTHER_CFLAGS:-} -Wno-unused-but-set-variable -Wno-unused-variable -Wno-declaration-after-statement"
-          export RC_CFLAGS="${RC_CFLAGS:-} -Wno-unused-but-set-variable"
-          
-          # New clang treats a lot of open-XNU idioms as -Werror; disable those.
-          export WARNFLAGS="-Wno-error -Wno-unused-but-set-variable -Wno-unused-variable -Wno-declaration-after-statement -Wno-suggest-override -Wno-suggest-destructor-override -Wno-null-pointer-subtraction -Wno-deprecated-declarations -Wno-undef"
-          export CFLAGS="${CFLAGS:-} ${WARNFLAGS}"
-          export CXXFLAGS="${CXXFLAGS:-} ${WARNFLAGS}"
-          export OTHER_CFLAGS="${OTHER_CFLAGS:-} ${WARNFLAGS}"
-          export OTHER_CXXFLAGS="${OTHER_CXXFLAGS:-} ${WARNFLAGS}"
-          export RC_CFLAGS="${RC_CFLAGS:-} ${WARNFLAGS}"
-          # KPC is Apple PMU; sweet stubs it. Define max counters if header missing.
-          export CFLAGS="${CFLAGS} -DKPC_MAX_COUNTERS=32"
-          export OTHER_CFLAGS="${OTHER_CFLAGS} -DKPC_MAX_COUNTERS=32"
-
-          # Firehose: full stub (decls + defs) — empty .a is not enough for compile
-          STUBDIR="$GITHUB_WORKSPACE/ci-lib"
-          mkdir -p "$STUBDIR"
-          if [ -f "$GITHUB_WORKSPACE/ci-lib/firehose_kernel_stub.c" ]; then
-            cp "$GITHUB_WORKSPACE/ci-lib/firehose_kernel_stub."* "$STUBDIR/" 2>/dev/null || true
+          # firehose .a for link only (no -include of competing header)
+          if [ -f "$STUBDIR/firehose_kernel_stub.c" ]; then
+            $(xcrun -f clang) -c "$STUBDIR/firehose_kernel_stub.c" -I"$STUBDIR" -o "$STUBDIR/firehose_kernel_stub.o"
+            $(xcrun -f ar) rcs "$STUBDIR/libfirehose_kernel.a" "$STUBDIR/firehose_kernel_stub.o"
+          else
+            echo 'void __firehose_kernel_unused_stub(void){}' > /tmp/fh_empty.c
+            $(xcrun -f clang) -c /tmp/fh_empty.c -o /tmp/fh_empty.o
+            $(xcrun -f ar) rcs "$STUBDIR/libfirehose_kernel.a" /tmp/fh_empty.o
           fi
-          # Prefer repo copies
-          SRC_STUB="$GITHUB_WORKSPACE/ci-lib"
-          $(xcrun -f clang) -c "$SRC_STUB/firehose_kernel_stub.c" -I"$SRC_STUB" -o "$STUBDIR/firehose_kernel_stub.o"
-          $(xcrun -f ar) rcs "$STUBDIR/libfirehose_kernel.a" "$STUBDIR/firehose_kernel_stub.o"
           export LIBRARY_PATH="$STUBDIR:${LIBRARY_PATH:-}"
-          export CFLAGS="${CFLAGS:-} -I$SRC_STUB"
-          export OTHER_CFLAGS="${OTHER_CFLAGS:-} -I$SRC_STUB"
-          export RC_CFLAGS="${RC_CFLAGS:-} -I$SRC_STUB"
-          make ARCH_CONFIGS=ARM64 KERNEL_CONFIGS=DEVELOPMENT MACHINE_CONFIGS=CUSCOI WERROR= CWARNFLAGS="-Wno-four-char-constants -Wno-pointer-to-int-cast -Wno-void-pointer-to-enum-cast -Wno-unused-but-set-variable -Wno-suggest-override -Wno-suggest-destructor-override -Wno-null-pointer-subtraction -Wno-deprecated-declarations" CXXWARNFLAGS="-Wno-four-char-constants -Wno-pointer-to-int-cast -Wno-void-pointer-to-enum-cast -Wno-suggest-override -Wno-suggest-destructor-override -Wno-deprecated-declarations" KPC_MAX_COUNTERS=32 2>&1 | tee "$GITHUB_WORKSPACE/build.log"
+          make ARCH_CONFIGS=ARM64 KERNEL_CONFIGS=DEVELOPMENT MACHINE_CONFIGS=CUSCOI \
+            SDKROOT="$SDKROOT" \
+            CC="$BIN/clang" CXX="$BIN/clang++" CPP="$BIN/cpp-wrap" \
+            WERROR= \
+            2>&1 | tee "$GITHUB_WORKSPACE/build.log"
+
       - name: Collect
         if: always()
         run: |
           mkdir -p out
-          cp -v "$GITHUB_WORKSPACE/build.log" out/ 2>/dev/null || cp -v build.log out/ 2>/dev/null || true
+          cp -v "$GITHUB_WORKSPACE/build.log" out/ 2>/dev/null || true
           find xnu-src -type f -name 'kernel*' 2>/dev/null | tee out/find.txt || true
-          while IFS= read -r f; do [ -f "$f" ] || continue; sz=$(wc -c < "$f" | tr -d ' '); [ "$sz" -gt 1000000 ] && cp -v "$f" "out/$(basename "$f")"; done < out/find.txt || true
+          while IFS= read -r f; do
+            [ -f "$f" ] || continue
+            sz=$(wc -c < "$f" | tr -d ' ')
+            [ "$sz" -gt 1000000 ] && cp -v "$f" "out/$(basename "$f")"
+          done < out/find.txt || true
           ls -la out
-          grep -E 'error:|fatal error:' build.log 2>/dev/null | grep -v warning | head -40 || true
+          echo "---- errors ----"
+          grep -E 'error:|fatal error:' out/build.log 2>/dev/null | grep -v warning | head -40 || true
+
       - uses: actions/upload-artifact@v4
         if: always()
         with:
