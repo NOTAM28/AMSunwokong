@@ -114,6 +114,7 @@ jobs:
           #pragma clang diagnostic ignored "-Wtautological-value-range-compare"
           #pragma clang diagnostic ignored "-Wtautological-compare"
           #pragma clang diagnostic ignored "-Wfour-char-constants"
+#pragma clang diagnostic ignored "-Wsign-conversion"
           #pragma clang diagnostic ignored "-Wimplicit-function-declaration"
           #pragma clang diagnostic ignored "-Wincompatible-pointer-types"
           #pragma clang diagnostic ignored "-Wcompare-distinct-pointer-types"
@@ -186,15 +187,15 @@ jobs:
           $(xcrun -f clang) -c "$SRC_STUB/firehose_kernel_stub.c" -I"$SRC_STUB" -o "$STUBDIR/firehose_kernel_stub.o"
           $(xcrun -f ar) rcs "$STUBDIR/libfirehose_kernel.a" "$STUBDIR/firehose_kernel_stub.o"
           export LIBRARY_PATH="$STUBDIR:${LIBRARY_PATH:-}"
-          export CFLAGS="${CFLAGS:-} -I$SRC_STUB -include $SRC_STUB/firehose_kernel_stub.h"
-          export OTHER_CFLAGS="${OTHER_CFLAGS:-} -I$SRC_STUB -include $SRC_STUB/firehose_kernel_stub.h"
-          export RC_CFLAGS="${RC_CFLAGS:-} -I$SRC_STUB -include $SRC_STUB/firehose_kernel_stub.h"
-          make ARCH_CONFIGS=ARM64 KERNEL_CONFIGS=DEVELOPMENT MACHINE_CONFIGS=CUSCOI WERROR= CWARNFLAGS="-Wno-four-char-constants -Wno-pointer-to-int-cast -Wno-void-pointer-to-enum-cast -Wno-unused-but-set-variable -Wno-suggest-override -Wno-suggest-destructor-override -Wno-null-pointer-subtraction -Wno-deprecated-declarations" CXXWARNFLAGS="-Wno-four-char-constants -Wno-pointer-to-int-cast -Wno-void-pointer-to-enum-cast -Wno-suggest-override -Wno-suggest-destructor-override -Wno-deprecated-declarations" KPC_MAX_COUNTERS=32 2>&1 | tee build.log
+          export CFLAGS="${CFLAGS:-} -I$SRC_STUB"
+          export OTHER_CFLAGS="${OTHER_CFLAGS:-} -I$SRC_STUB"
+          export RC_CFLAGS="${RC_CFLAGS:-} -I$SRC_STUB"
+          make ARCH_CONFIGS=ARM64 KERNEL_CONFIGS=DEVELOPMENT MACHINE_CONFIGS=CUSCOI WERROR= CWARNFLAGS="-Wno-four-char-constants -Wno-pointer-to-int-cast -Wno-void-pointer-to-enum-cast -Wno-unused-but-set-variable -Wno-suggest-override -Wno-suggest-destructor-override -Wno-null-pointer-subtraction -Wno-deprecated-declarations" CXXWARNFLAGS="-Wno-four-char-constants -Wno-pointer-to-int-cast -Wno-void-pointer-to-enum-cast -Wno-suggest-override -Wno-suggest-destructor-override -Wno-deprecated-declarations" KPC_MAX_COUNTERS=32 2>&1 | tee "$GITHUB_WORKSPACE/build.log"
       - name: Collect
         if: always()
         run: |
           mkdir -p out
-          cp -v build.log out/ 2>/dev/null || true
+          cp -v "$GITHUB_WORKSPACE/build.log" out/ 2>/dev/null || cp -v build.log out/ 2>/dev/null || true
           find xnu-src -type f -name 'kernel*' 2>/dev/null | tee out/find.txt || true
           while IFS= read -r f; do [ -f "$f" ] || continue; sz=$(wc -c < "$f" | tr -d ' '); [ "$sz" -gt 1000000 ] && cp -v "$f" "out/$(basename "$f")"; done < out/find.txt || true
           ls -la out
