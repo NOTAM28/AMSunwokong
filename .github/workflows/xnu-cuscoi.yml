@@ -1,41 +1,28 @@
 name: xnu-cuscoi
-
 on:
   workflow_dispatch:
   push:
     branches: [main]
-    paths:
-      - "xnu/patches/**"
-      - "scripts/**"
-      - ".github/workflows/xnu-cuscoi.yml"
-
 jobs:
   build:
     runs-on: macos-14
     timeout-minutes: 180
     steps:
       - uses: actions/checkout@v4
-
       - name: Fetch XNU
         run: |
           set -euo pipefail
-          git clone --depth 1 --branch xnu-8796.101.5 \
-            https://github.com/apple-oss-distributions/xnu.git xnu-src
+          git clone --depth 1 --branch xnu-8796.101.5 https://github.com/apple-oss-distributions/xnu.git xnu-src
           cd xnu-src && git log -1 --oneline
-
       - name: Apply patches
         run: |
           chmod +x scripts/apply-patches.sh
           ./scripts/apply-patches.sh xnu-src xnu/patches
-
-      - name: Prep board + stubs
+      - name: Prep
         working-directory: xnu-src
         run: |
           set -euo pipefail
-          find . -type f \( -name '*.h' -o -name '*.c' -o -name '*.cpp' -o -name 'Makefile*' -o -name '*.mk' -o -name 'MASTER*' \) \
-            -print0 2>/dev/null | xargs -0 grep -l 'sweet_early' 2>/dev/null \
-            | while read -r f; do sed -i.bak 's/sweet_early/cuscoi_early/g' "$f" || true; done
-
+          find . -type f \( -name '*.h' -o -name '*.c' -o -name '*.cpp' -o -name 'Makefile*' -o -name '*.mk' -o -name 'MASTER*' \) -print0 2>/dev/null | xargs -0 grep -l 'sweet_early' 2>/dev/null | while read -r f; do sed -i.bak 's/sweet_early/cuscoi_early/g' "$f" || true; done
           mkdir -p osfmk/arm64
           cat > osfmk/arm64/cuscoi_early.h << 'EH'
           #ifndef _ARM64_CUSCOI_EARLY_H_
@@ -52,7 +39,6 @@ jobs:
           #endif
           #endif
           EH
-
           mkdir -p iokit/Kernel/arm
           cat > iokit/Kernel/arm/SweetPlatformExpert.cpp << 'PE'
           #include <IOKit/IOLib.h>
@@ -63,29 +49,18 @@ jobs:
               virtual bool start(IOService *provider) APPLE_KEXT_OVERRIDE;
           };
           OSDefineMetaClassAndStructors(SweetPlatformExpert, IOPlatformExpert)
-          bool SweetPlatformExpert::start(IOService *provider)
-          {
-              return IOPlatformExpert::start(provider);
-          }
+          bool SweetPlatformExpert::start(IOService *provider) { return IOPlatformExpert::start(provider); }
           PE
-
           mkdir -p bsd/sys BUILD/obj/bsd/sys
           echo '/* stub */' > bsd/sys/_symbol_aliasing.h
           echo '/* stub */' > bsd/sys/_posix_availability.h
           cp -f bsd/sys/_symbol_aliasing.h bsd/sys/_posix_availability.h BUILD/obj/bsd/sys/ || true
           printf '#!/bin/bash\nexit 0\n' > bsd/sys/make_symbol_aliasing.sh
           chmod +x bsd/sys/make_symbol_aliasing.sh
-
           H=libkern/c++/OSMetaClass.h
           if [ -f "$H" ] && ! grep -q 'CI: xcode15' "$H"; then
-            { echo '/* CI: xcode15 */'
-              echo '#pragma clang diagnostic push'
-              echo '#pragma clang diagnostic ignored "-Wsuggest-override"'
-              echo '#pragma clang diagnostic ignored "-Wsuggest-destructor-override"'
-              cat "$H"
-            } > "$H.tmp" && mv "$H.tmp" "$H"
+            { echo '/* CI: xcode15 */'; echo '#pragma clang diagnostic push'; echo '#pragma clang diagnostic ignored "-Wsuggest-override"'; echo '#pragma clang diagnostic ignored "-Wsuggest-destructor-override"'; cat "$H"; } > "$H.tmp" && mv "$H.tmp" "$H"
           fi
-
           mkdir -p libkern/os BUILD/obj/EXPORT_HDRS/libkern/os BUILD/obj/EXPORT_HDRS/os
           cat > libkern/os/firehose_buffer_private.h << 'FH'
           #ifndef _OS_FIREHOSE_BUFFER_PRIVATE_H_
@@ -102,22 +77,13 @@ jobs:
           #ifndef FIREHOSE_CHUNK_SIZE
           #define FIREHOSE_CHUNK_SIZE 4096
           #endif
-          #ifdef __cplusplus
-          extern "C" {
-          #endif
-          static inline void *__firehose_buffer_tracepoint_reserve(unsigned long long a, int b, unsigned short c, int d, void *e)
-          { (void)a; (void)b; (void)c; (void)d; (void)e; return (void *)0; }
-          static inline void __firehose_buffer_tracepoint_flush(void *a, void *b)
-          { (void)a; (void)b; }
-          static inline void *__firehose_buffer_get_kernel(void) { return (void *)0; }
-          #ifdef __cplusplus
-          }
-          #endif
+          #define __firehose_buffer_tracepoint_reserve(...) ((void *)0)
+          #define __firehose_buffer_tracepoint_flush(a, b) ((void)(a), (void)(b))
+          #define __firehose_buffer_get_kernel() ((void *)0)
           #endif
           FH
           cp -f libkern/os/firehose_buffer_private.h BUILD/obj/EXPORT_HDRS/libkern/os/
           cp -f libkern/os/firehose_buffer_private.h BUILD/obj/EXPORT_HDRS/os/ 2>/dev/null || true
-
       - name: Build
         working-directory: xnu-src
         run: |
@@ -160,25 +126,16 @@ jobs:
           printf '#!/bin/bash\nexec "%s" -include "%s" "$@"\n' "$REAL_CXX" "$OFF" > "$BIN/clang++"
           printf '#!/bin/bash\nexec "%s" -E -include "%s" "$@"\n' "$REAL_CLANG" "$OFF" > "$BIN/cpp-wrap"
           chmod +x "$BIN/clang" "$BIN/clang++" "$BIN/cpp-wrap"
-          make ARCH_CONFIGS=ARM64 KERNEL_CONFIGS=DEVELOPMENT MACHINE_CONFIGS=CUSCOI \
-            SDKROOT="$SDKROOT" \
-            CC="$BIN/clang" CXX="$BIN/clang++" CPP="$BIN/cpp-wrap" \
-            -j$(sysctl -n hw.ncpu) 2>&1 | tee ../build.log
-
+          make ARCH_CONFIGS=ARM64 KERNEL_CONFIGS=DEVELOPMENT MACHINE_CONFIGS=CUSCOI SDKROOT="$SDKROOT" CC="$BIN/clang" CXX="$BIN/clang++" CPP="$BIN/cpp-wrap" -j$(sysctl -n hw.ncpu) 2>&1 | tee ../build.log
       - name: Collect
         if: always()
         run: |
           mkdir -p out
           cp -v build.log out/ 2>/dev/null || true
           find xnu-src -type f -name 'kernel*' 2>/dev/null | tee out/find.txt || true
-          while IFS= read -r f; do
-            [ -f "$f" ] || continue
-            sz=$(wc -c < "$f" | tr -d ' ')
-            [ "$sz" -gt 1000000 ] && cp -v "$f" "out/$(basename "$f")"
-          done < out/find.txt || true
+          while IFS= read -r f; do [ -f "$f" ] || continue; sz=$(wc -c < "$f" | tr -d ' '); [ "$sz" -gt 1000000 ] && cp -v "$f" "out/$(basename "$f")"; done < out/find.txt || true
           ls -la out
           grep -E 'error:|fatal error:' build.log 2>/dev/null | grep -v warning | head -40 || true
-
       - uses: actions/upload-artifact@v4
         if: always()
         with:
