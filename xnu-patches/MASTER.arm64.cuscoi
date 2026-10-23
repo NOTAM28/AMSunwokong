@@ -1,0 +1,18 @@
+#
+# CUSCOI (Moto G96 / SM7435): same open-source arm64 asm+pmap as sweet
+# nos_arm_asm provides __start / locore; without it link fails with
+# "entry point (__start) undefined".
+#
+machine"arm64"
+makeoptionsOSFMK_MACHINE = "arm64"
+optionsCOUNT_SYSCALLS
+options     TRASH_VFP_ON_SAVE
+optionsALTERNATE_DEBUGGER
+options   CONFIG_VNODES=1024
+options   CONFIG_FREEZE_SUSPENDED_MIN=4
+options  CONFIG_MACH_APPROXIMATE_TIME
+options   CONFIG_KERNEL_INTEGRITY
+options CONFIG_MACF_LAZY_VNODE_LABELS
+options CONFIG_HYPERVISOR_PUBLIC
+options   CONFIG_RESLIDE_SHARED_CACHE
+options   CONFIG_KERNEL_TBI
