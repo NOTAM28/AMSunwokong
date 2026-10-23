@@ -143,7 +143,24 @@ jobs:
           $(xcrun -f ar) rcs "$STUBDIR/libfirehose_kernel.a" /tmp/fh_empty.o
           export LIBRARY_PATH="$STUBDIR:${LIBRARY_PATH:-}"
           export LDFLAGS="${LDFLAGS:-} -L$STUBDIR -u __start -e __start"
-                    make ARCH_CONFIGS=ARM64 KERNEL_CONFIGS=DEVELOPMENT MACHINE_CONFIGS=CUSCOI SDKROOT="$SDKROOT" CC="$BIN/clang" CXX="$BIN/clang++" CPP="$BIN/cpp-wrap" -j$(sysctl -n hw.ncpu) 2>&1 | tee ../build.log
+                              # CUSCOI: ensure nos_arm_asm MASTER is present (provides __start)
+                              SRC="$GITHUB_WORKSPACE/xnu-src"
+                              if [ -f "$GITHUB_WORKSPACE/xnu-patches/MASTER.arm64.cuscoi" ]; then
+                                mkdir -p "$SRC/config"
+                                cp "$GITHUB_WORKSPACE/xnu-patches/MASTER.arm64.cuscoi" "$SRC/config/MASTER.arm64.cuscoi"
+                                echo "Installed MASTER.arm64.cuscoi"
+                                grep -n nos_arm_asm "$SRC/config/MASTER.arm64.cuscoi" | head
+                              fi
+                              if [ -f "$SRC/config/MASTER.arm64.cuscoi" ] && ! grep -q nos_arm_asm "$SRC/config/MASTER.arm64.cuscoi"; then
+                                echo "ERROR: MASTER.arm64.cuscoi missing nos_arm_asm"; exit 1
+                              fi
+                              STUBDIR="$GITHUB_WORKSPACE/ci-lib"
+                              mkdir -p "$STUBDIR"
+                              echo 'void __firehose_kernel_unused_stub(void){}' > /tmp/fh_empty.c
+                              $(xcrun -f clang) -c /tmp/fh_empty.c -o /tmp/fh_empty.o
+                              $(xcrun -f ar) rcs "$STUBDIR/libfirehose_kernel.a" /tmp/fh_empty.o
+                              export LIBRARY_PATH="$STUBDIR:${LIBRARY_PATH:-}"
+                              make ARCH_CONFIGS=ARM64 KERNEL_CONFIGS=DEVELOPMENT MACHINE_CONFIGS=CUSCOI
       - name: Collect
         if: always()
         run: |
