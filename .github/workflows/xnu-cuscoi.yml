@@ -163,6 +163,17 @@ jobs:
                               export CFLAGS="${CFLAGS:-} -Wno-unused-but-set-variable -Wno-unused-variable -Wno-declaration-after-statement"
           export OTHER_CFLAGS="${OTHER_CFLAGS:-} -Wno-unused-but-set-variable -Wno-unused-variable -Wno-declaration-after-statement"
           export RC_CFLAGS="${RC_CFLAGS:-} -Wno-unused-but-set-variable"
+          
+          # New clang treats a lot of open-XNU idioms as -Werror; disable those.
+          export WARNFLAGS="-Wno-error -Wno-unused-but-set-variable -Wno-unused-variable -Wno-declaration-after-statement -Wno-suggest-override -Wno-suggest-destructor-override -Wno-null-pointer-subtraction -Wno-deprecated-declarations -Wno-undef"
+          export CFLAGS="${CFLAGS:-} ${WARNFLAGS}"
+          export CXXFLAGS="${CXXFLAGS:-} ${WARNFLAGS}"
+          export OTHER_CFLAGS="${OTHER_CFLAGS:-} ${WARNFLAGS}"
+          export OTHER_CXXFLAGS="${OTHER_CXXFLAGS:-} ${WARNFLAGS}"
+          export RC_CFLAGS="${RC_CFLAGS:-} ${WARNFLAGS}"
+          # KPC is Apple PMU; sweet stubs it. Define max counters if header missing.
+          export CFLAGS="${CFLAGS} -DKPC_MAX_COUNTERS=32"
+          export OTHER_CFLAGS="${OTHER_CFLAGS} -DKPC_MAX_COUNTERS=32"
           make ARCH_CONFIGS=ARM64 KERNEL_CONFIGS=DEVELOPMENT MACHINE_CONFIGS=CUSCOI
       - name: Collect
         if: always()
