@@ -1,6 +1,6 @@
 #include "firehose_kernel_stub.h"
 
-bool __firehose_merge_updates(struct firehose_push_reply_s reply) {
+bool __firehose_merge_updates(struct firehose_push_reply_s *reply) {
   (void)reply;
   return false;
 }
