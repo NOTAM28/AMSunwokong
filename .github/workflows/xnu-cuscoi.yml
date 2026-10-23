@@ -86,38 +86,35 @@ jobs:
             } > "$H.tmp" && mv "$H.tmp" "$H"
           fi
 
-          # firehose: macros only (types already in firehose_types_private.h)
           mkdir -p libkern/os BUILD/obj/EXPORT_HDRS/libkern/os BUILD/obj/EXPORT_HDRS/os
           cat > libkern/os/firehose_buffer_private.h << 'FH'
-#ifndef _OS_FIREHOSE_BUFFER_PRIVATE_H_
-#define _OS_FIREHOSE_BUFFER_PRIVATE_H_
-/* macros only + weak-ish decls used by log.c — do not redefine firehose_buffer_t */
-#ifndef FIREHOSE_BUFFER_KERNEL_DEFAULT_CHUNK_COUNT
-#define FIREHOSE_BUFFER_KERNEL_DEFAULT_CHUNK_COUNT 64
-#endif
-#ifndef FIREHOSE_BUFFER_KERNEL_DEFAULT_IO_PAGES
-#define FIREHOSE_BUFFER_KERNEL_DEFAULT_IO_PAGES 4
-#endif
-#ifndef FIREHOSE_BUFFER_KERNEL_CHUNK_COUNT
-#define FIREHOSE_BUFFER_KERNEL_CHUNK_COUNT FIREHOSE_BUFFER_KERNEL_DEFAULT_CHUNK_COUNT
-#endif
-#ifndef FIREHOSE_CHUNK_SIZE
-#define FIREHOSE_CHUNK_SIZE 4096
-#endif
-#ifdef __cplusplus
-extern "C" {
-#endif
-/* return NULL so callers treat as failure / no-op */
-static inline void *__firehose_buffer_tracepoint_reserve(unsigned long long a, int b, unsigned short c, int d, void *e)
-{ (void)a;(void)b;(void)c;(void)d;(void)e; return (void *)0; }
-static inline void __firehose_buffer_tracepoint_flush(void *a, void *b)
-{ (void)a;(void)b; }
-static inline void *__firehose_buffer_get_kernel(void) { return (void *)0; }
-#ifdef __cplusplus
-}
-#endif
-#endif
-FH
+          #ifndef _OS_FIREHOSE_BUFFER_PRIVATE_H_
+          #define _OS_FIREHOSE_BUFFER_PRIVATE_H_
+          #ifndef FIREHOSE_BUFFER_KERNEL_DEFAULT_CHUNK_COUNT
+          #define FIREHOSE_BUFFER_KERNEL_DEFAULT_CHUNK_COUNT 64
+          #endif
+          #ifndef FIREHOSE_BUFFER_KERNEL_DEFAULT_IO_PAGES
+          #define FIREHOSE_BUFFER_KERNEL_DEFAULT_IO_PAGES 4
+          #endif
+          #ifndef FIREHOSE_BUFFER_KERNEL_CHUNK_COUNT
+          #define FIREHOSE_BUFFER_KERNEL_CHUNK_COUNT FIREHOSE_BUFFER_KERNEL_DEFAULT_CHUNK_COUNT
+          #endif
+          #ifndef FIREHOSE_CHUNK_SIZE
+          #define FIREHOSE_CHUNK_SIZE 4096
+          #endif
+          #ifdef __cplusplus
+          extern "C" {
+          #endif
+          static inline void *__firehose_buffer_tracepoint_reserve(unsigned long long a, int b, unsigned short c, int d, void *e)
+          { (void)a; (void)b; (void)c; (void)d; (void)e; return (void *)0; }
+          static inline void __firehose_buffer_tracepoint_flush(void *a, void *b)
+          { (void)a; (void)b; }
+          static inline void *__firehose_buffer_get_kernel(void) { return (void *)0; }
+          #ifdef __cplusplus
+          }
+          #endif
+          #endif
+          FH
           cp -f libkern/os/firehose_buffer_private.h BUILD/obj/EXPORT_HDRS/libkern/os/
           cp -f libkern/os/firehose_buffer_private.h BUILD/obj/EXPORT_HDRS/os/ 2>/dev/null || true
 
@@ -151,11 +148,11 @@ FH
           #pragma clang diagnostic ignored "-Wtautological-value-range-compare"
           #pragma clang diagnostic ignored "-Wtautological-compare"
           #pragma clang diagnostic ignored "-Wfour-char-constants"
-          #pragma clang diagnostic ignored "-Wpointer-sign"
-          #pragma clang diagnostic ignored "-Wint-conversion"
-          #pragma clang diagnostic ignored "-Wcompare-distinct-pointer-types"
-          #pragma clang diagnostic ignored "-Wincompatible-pointer-types"
           #pragma clang diagnostic ignored "-Wimplicit-function-declaration"
+          #pragma clang diagnostic ignored "-Wincompatible-pointer-types"
+          #pragma clang diagnostic ignored "-Wcompare-distinct-pointer-types"
+          #pragma clang diagnostic ignored "-Wint-conversion"
+          #pragma clang diagnostic ignored "-Wpointer-sign"
           H
           REAL_CLANG=$(xcrun -f clang)
           REAL_CXX=$(xcrun -f clang++)
