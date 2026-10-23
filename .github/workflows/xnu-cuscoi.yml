@@ -160,7 +160,10 @@ jobs:
                               $(xcrun -f clang) -c /tmp/fh_empty.c -o /tmp/fh_empty.o
                               $(xcrun -f ar) rcs "$STUBDIR/libfirehose_kernel.a" /tmp/fh_empty.o
                               export LIBRARY_PATH="$STUBDIR:${LIBRARY_PATH:-}"
-                              make ARCH_CONFIGS=ARM64 KERNEL_CONFIGS=DEVELOPMENT MACHINE_CONFIGS=CUSCOI
+                              export CFLAGS="${CFLAGS:-} -Wno-unused-but-set-variable -Wno-unused-variable -Wno-declaration-after-statement"
+          export OTHER_CFLAGS="${OTHER_CFLAGS:-} -Wno-unused-but-set-variable -Wno-unused-variable -Wno-declaration-after-statement"
+          export RC_CFLAGS="${RC_CFLAGS:-} -Wno-unused-but-set-variable"
+          make ARCH_CONFIGS=ARM64 KERNEL_CONFIGS=DEVELOPMENT MACHINE_CONFIGS=CUSCOI
       - name: Collect
         if: always()
         run: |
