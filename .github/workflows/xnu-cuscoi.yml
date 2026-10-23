@@ -143,22 +143,7 @@ jobs:
           $(xcrun -f ar) rcs "$STUBDIR/libfirehose_kernel.a" /tmp/fh_empty.o
           export LIBRARY_PATH="$STUBDIR:${LIBRARY_PATH:-}"
           export LDFLAGS="${LDFLAGS:-} -L$STUBDIR -u __start -e __start"
-          # firehose + exact __start object (XNU ignores plain LDFLAGS often)
-          STUBDIR="$GITHUB_WORKSPACE/ci-lib"
-          mkdir -p "$STUBDIR"
-          echo 'void __firehose_kernel_unused_stub(void){}' > /tmp/fh_empty.c
-          $(xcrun -f clang) -c /tmp/fh_empty.c -o /tmp/fh_empty.o
-          $(xcrun -f ar) rcs "$STUBDIR/libfirehose_kernel.a" /tmp/fh_empty.o
-          START_C="$GITHUB_WORKSPACE/xnu-patches/cuscoi_start.c"
-          $(xcrun -f clang) -c -arch arm64 -O2 -fno-stack-protector -o "$STUBDIR/cuscoi_start.o" "$START_C"
-          # prove symbol name is __start not ___start
-          nm "$STUBDIR/cuscoi_start.o" | grep -E ' __start$' || { echo "BAD SYMBOL:"; nm "$STUBDIR/cuscoi_start.o"; exit 1; }
-          export LIBRARY_PATH="$STUBDIR:${LIBRARY_PATH:-}"
-          # XNU uses OTHER_LDFLAGS / LDFLAGS_KERNEL on many trees
-          export OTHER_LDFLAGS="${OTHER_LDFLAGS:-} $STUBDIR/cuscoi_start.o -e __start"
-          export LDFLAGS_KERNEL="${LDFLAGS_KERNEL:-} $STUBDIR/cuscoi_start.o -e __start"
-          export LDFLAGS="${LDFLAGS:-} -L$STUBDIR $STUBDIR/cuscoi_start.o -u __start -e __start"
-          make ARCH_CONFIGS=ARM64 KERNEL_CONFIGS=DEVELOPMENT MACHINE_CONFIGS=CUSCOI SDKROOT="$SDKROOT" CC="$BIN/clang" CXX="$BIN/clang++" CPP="$BIN/cpp-wrap" -j$(sysctl -n hw.ncpu) 2>&1 | tee ../build.log
+                    make ARCH_CONFIGS=ARM64 KERNEL_CONFIGS=DEVELOPMENT MACHINE_CONFIGS=CUSCOI SDKROOT="$SDKROOT" CC="$BIN/clang" CXX="$BIN/clang++" CPP="$BIN/cpp-wrap" -j$(sysctl -n hw.ncpu) 2>&1 | tee ../build.log
       - name: Collect
         if: always()
         run: |
