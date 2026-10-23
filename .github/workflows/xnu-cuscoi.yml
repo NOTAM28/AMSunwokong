@@ -1,29 +1,23 @@
 name: xnu-cuscoi
-
 on:
   workflow_dispatch:
   push:
     branches: [main]
-
 jobs:
   build:
     runs-on: macos-14
     timeout-minutes: 180
     steps:
       - uses: actions/checkout@v4
-
       - name: Fetch XNU
         run: |
           set -euo pipefail
           git clone --depth 1 --branch xnu-8796.101.5 \
             https://github.com/apple-oss-distributions/xnu.git xnu-src
-          cd xnu-src && git log -1 --oneline
-
       - name: Apply patches
         run: |
           chmod +x scripts/apply-patches.sh
           ./scripts/apply-patches.sh xnu-src xnu/patches || true
-
       - name: Prep
         working-directory: xnu-src
         run: |
@@ -31,8 +25,7 @@ jobs:
           if [ -f "$GITHUB_WORKSPACE/xnu-patches/MASTER.arm64.cuscoi" ]; then
             mkdir -p config
             cp "$GITHUB_WORKSPACE/xnu-patches/MASTER.arm64.cuscoi" config/MASTER.arm64.cuscoi
-            echo "Installed MASTER.arm64.cuscoi"
-            grep -n nos_arm_asm config/MASTER.arm64.cuscoi | head
+            grep -n nos_arm_asm config/MASTER.arm64.cuscoi | head || true
           fi
           find . -type f \( -name '*.h' -o -name '*.c' -o -name '*.cpp' -o -name 'Makefile*' -o -name '*.mk' -o -name 'MASTER*' \) \
             -print0 2>/dev/null | xargs -0 grep -l 'sweet_early' 2>/dev/null \
@@ -71,8 +64,7 @@ jobs:
           echo '/* stub */' > bsd/sys/_symbol_aliasing.h
           echo '/* stub */' > bsd/sys/_posix_availability.h
           cp -f bsd/sys/_symbol_aliasing.h bsd/sys/_posix_availability.h BUILD/obj/bsd/sys/ || true
-          printf '#!/bin/bash\nexit 0\n' > bsd/sys/make_symbol_aliasing.sh
-          chmod +x bsd/sys/make_symbol_aliasing.sh
+          printf '#!/bin/bash\nexit 0\n' > bsd/sys/make_symbol_aliasing.sh && chmod +x bsd/sys/make_symbol_aliasing.sh
           mkdir -p libkern/os BUILD/obj/EXPORT_HDRS/libkern/os BUILD/obj/EXPORT_HDRS/os
           cat > libkern/os/firehose_buffer_private.h << 'FH'
           #ifndef _OS_FIREHOSE_BUFFER_PRIVATE_H_
@@ -93,7 +85,33 @@ jobs:
           FH
           cp -f libkern/os/firehose_buffer_private.h BUILD/obj/EXPORT_HDRS/libkern/os/
           cp -f libkern/os/firehose_buffer_private.h BUILD/obj/EXPORT_HDRS/os/ 2>/dev/null || true
-
+          # KPC: inject kpcdata into kperf_sample if missing (open XNU / no Apple PMU)
+          python3 << 'PY'
+          from pathlib import Path
+          for p in Path("osfmk/kperf").rglob("*.h"):
+              t = p.read_text(errors="ignore")
+              if "struct kperf_sample" not in t or "kpcdata" in t:
+                  continue
+              # insert a dummy kpcdata before the closing of the struct (first }; after struct kperf_sample)
+              lines = t.splitlines(keepends=True)
+              out, in_struct, depth = [], False, 0
+              for line in lines:
+                  if not in_struct and "struct kperf_sample" in line and "{" in line:
+                      in_struct = True
+                      depth = line.count("{") - line.count("}")
+                      out.append(line)
+                      continue
+                  if in_struct:
+                      depth += line.count("{") - line.count("}")
+                      if depth <= 0:
+                          out.append("\tstruct { unsigned long long counterv[32]; unsigned long long configv[32]; } kpcdata;\n")
+                          in_struct = False
+                      out.append(line)
+                      continue
+                  out.append(line)
+              p.write_text("".join(out))
+              print("patched", p)
+          PY
       - name: Build
         working-directory: xnu-src
         run: |
@@ -105,7 +123,6 @@ jobs:
           STUBDIR="$GITHUB_WORKSPACE/ci-lib"
           mkdir -p "$BIN" "$STUBDIR"
           cat > "$OFF" << 'H'
-          #define KPC_MAX_COUNTERS 32
           #pragma clang diagnostic ignored "-Wsuggest-override"
           #pragma clang diagnostic ignored "-Wsuggest-destructor-override"
           #pragma clang diagnostic ignored "-Wunused-but-set-variable"
@@ -134,6 +151,7 @@ jobs:
           #pragma clang diagnostic ignored "-Wint-conversion"
           #pragma clang diagnostic ignored "-Wpointer-sign"
           #pragma clang diagnostic ignored "-Wc2x-compat"
+          #pragma clang diagnostic ignored "-Wmacro-redefined"
           H
           REAL_CLANG=$(xcrun -f clang)
           REAL_CXX=$(xcrun -f clang++)
@@ -155,7 +173,6 @@ jobs:
             CC="$BIN/clang" CXX="$BIN/clang++" CPP="$BIN/cpp-wrap" \
             WERROR= \
             2>&1 | tee "$GITHUB_WORKSPACE/build.log"
-
       - name: Collect
         if: always()
         run: |
@@ -170,7 +187,6 @@ jobs:
           ls -la out
           echo "---- errors ----"
           grep -E 'error:|fatal error:' out/build.log 2>/dev/null | grep -v warning | head -40 || true
-
       - uses: actions/upload-artifact@v4
         if: always()
         with:
