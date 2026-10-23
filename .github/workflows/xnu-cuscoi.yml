@@ -135,6 +135,14 @@ jobs:
           $(xcrun -f ar) rcs "$STUBDIR/libfirehose_kernel.a" /tmp/fh_empty.o
           export LIBRARY_PATH="$STUBDIR:${LIBRARY_PATH:-}"
           export LDFLAGS="${LDFLAGS:-} -L$STUBDIR"
+          # Stub closed libfirehose_kernel + force kernel entry __start
+          STUBDIR="$GITHUB_WORKSPACE/ci-lib"
+          mkdir -p "$STUBDIR"
+          echo 'void __firehose_kernel_unused_stub(void){}' > /tmp/fh_empty.c
+          $(xcrun -f clang) -c /tmp/fh_empty.c -o /tmp/fh_empty.o
+          $(xcrun -f ar) rcs "$STUBDIR/libfirehose_kernel.a" /tmp/fh_empty.o
+          export LIBRARY_PATH="$STUBDIR:${LIBRARY_PATH:-}"
+          export LDFLAGS="${LDFLAGS:-} -L$STUBDIR -u __start -e __start"
           make ARCH_CONFIGS=ARM64 KERNEL_CONFIGS=DEVELOPMENT MACHINE_CONFIGS=CUSCOI SDKROOT="$SDKROOT" CC="$BIN/clang" CXX="$BIN/clang++" CPP="$BIN/cpp-wrap" -j$(sysctl -n hw.ncpu) 2>&1 | tee ../build.log
       - name: Collect
         if: always()
