@@ -143,6 +143,18 @@ jobs:
           $(xcrun -f ar) rcs "$STUBDIR/libfirehose_kernel.a" /tmp/fh_empty.o
           export LIBRARY_PATH="$STUBDIR:${LIBRARY_PATH:-}"
           export LDFLAGS="${LDFLAGS:-} -L$STUBDIR -u __start -e __start"
+          # firehose stub + minimal __start (CUSCOI conf omits locore/start)
+          STUBDIR="$GITHUB_WORKSPACE/ci-lib"
+          mkdir -p "$STUBDIR"
+          echo 'void __firehose_kernel_unused_stub(void){}' > /tmp/fh_empty.c
+          $(xcrun -f clang) -c /tmp/fh_empty.c -o /tmp/fh_empty.o
+          $(xcrun -f ar) rcs "$STUBDIR/libfirehose_kernel.a" /tmp/fh_empty.o
+          # assemble entry
+          START_S="$GITHUB_WORKSPACE/xnu-patches/cuscoi_start.s"
+          if [ ! -f "$START_S" ]; then START_S="$(find "$GITHUB_WORKSPACE" -name cuscoi_start.s | head -1)"; fi
+          $(xcrun -f clang) -c -arch arm64 -o "$STUBDIR/cuscoi_start.o" "$START_S"
+          export LIBRARY_PATH="$STUBDIR:${LIBRARY_PATH:-}"
+          export LDFLAGS="${LDFLAGS:-} -L$STUBDIR $STUBDIR/cuscoi_start.o -u __start -e __start"
           make ARCH_CONFIGS=ARM64 KERNEL_CONFIGS=DEVELOPMENT MACHINE_CONFIGS=CUSCOI SDKROOT="$SDKROOT" CC="$BIN/clang" CXX="$BIN/clang++" CPP="$BIN/cpp-wrap" -j$(sysctl -n hw.ncpu) 2>&1 | tee ../build.log
       - name: Collect
         if: always()
