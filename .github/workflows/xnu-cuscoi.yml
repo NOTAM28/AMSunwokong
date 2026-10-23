@@ -174,7 +174,22 @@ jobs:
           # KPC is Apple PMU; sweet stubs it. Define max counters if header missing.
           export CFLAGS="${CFLAGS} -DKPC_MAX_COUNTERS=32"
           export OTHER_CFLAGS="${OTHER_CFLAGS} -DKPC_MAX_COUNTERS=32"
-          make ARCH_CONFIGS=ARM64 KERNEL_CONFIGS=DEVELOPMENT MACHINE_CONFIGS=CUSCOI WERROR= CWARNFLAGS="-Wno-four-char-constants -Wno-pointer-to-int-cast -Wno-void-pointer-to-enum-cast -Wno-unused-but-set-variable -Wno-suggest-override -Wno-suggest-destructor-override -Wno-null-pointer-subtraction -Wno-deprecated-declarations" CXXWARNFLAGS="-Wno-four-char-constants -Wno-pointer-to-int-cast -Wno-void-pointer-to-enum-cast -Wno-suggest-override -Wno-suggest-destructor-override -Wno-deprecated-declarations" KPC_MAX_COUNTERS=32
+
+          # Firehose: full stub (decls + defs) — empty .a is not enough for compile
+          STUBDIR="$GITHUB_WORKSPACE/ci-lib"
+          mkdir -p "$STUBDIR"
+          if [ -f "$GITHUB_WORKSPACE/ci-lib/firehose_kernel_stub.c" ]; then
+            cp "$GITHUB_WORKSPACE/ci-lib/firehose_kernel_stub."* "$STUBDIR/" 2>/dev/null || true
+          fi
+          # Prefer repo copies
+          SRC_STUB="$GITHUB_WORKSPACE/ci-lib"
+          $(xcrun -f clang) -c "$SRC_STUB/firehose_kernel_stub.c" -I"$SRC_STUB" -o "$STUBDIR/firehose_kernel_stub.o"
+          $(xcrun -f ar) rcs "$STUBDIR/libfirehose_kernel.a" "$STUBDIR/firehose_kernel_stub.o"
+          export LIBRARY_PATH="$STUBDIR:${LIBRARY_PATH:-}"
+          export CFLAGS="${CFLAGS:-} -I$SRC_STUB -include $SRC_STUB/firehose_kernel_stub.h"
+          export OTHER_CFLAGS="${OTHER_CFLAGS:-} -I$SRC_STUB -include $SRC_STUB/firehose_kernel_stub.h"
+          export RC_CFLAGS="${RC_CFLAGS:-} -I$SRC_STUB -include $SRC_STUB/firehose_kernel_stub.h"
+          make ARCH_CONFIGS=ARM64 KERNEL_CONFIGS=DEVELOPMENT MACHINE_CONFIGS=CUSCOI WERROR= CWARNFLAGS="-Wno-four-char-constants -Wno-pointer-to-int-cast -Wno-void-pointer-to-enum-cast -Wno-unused-but-set-variable -Wno-suggest-override -Wno-suggest-destructor-override -Wno-null-pointer-subtraction -Wno-deprecated-declarations" CXXWARNFLAGS="-Wno-four-char-constants -Wno-pointer-to-int-cast -Wno-void-pointer-to-enum-cast -Wno-suggest-override -Wno-suggest-destructor-override -Wno-deprecated-declarations" KPC_MAX_COUNTERS=32 2>&1 | tee build.log
       - name: Collect
         if: always()
         run: |
