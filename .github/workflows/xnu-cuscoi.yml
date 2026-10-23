@@ -28,7 +28,6 @@ jobs:
         working-directory: xnu-src
         run: |
           set -euo pipefail
-          # MASTER with nos_arm_asm (__start)
           if [ -f "$GITHUB_WORKSPACE/xnu-patches/MASTER.arm64.cuscoi" ]; then
             mkdir -p config
             cp "$GITHUB_WORKSPACE/xnu-patches/MASTER.arm64.cuscoi" config/MASTER.arm64.cuscoi
@@ -74,7 +73,6 @@ jobs:
           cp -f bsd/sys/_symbol_aliasing.h bsd/sys/_posix_availability.h BUILD/obj/bsd/sys/ || true
           printf '#!/bin/bash\nexit 0\n' > bsd/sys/make_symbol_aliasing.sh
           chmod +x bsd/sys/make_symbol_aliasing.sh
-          # firehose macros only (no competing typedefs)
           mkdir -p libkern/os BUILD/obj/EXPORT_HDRS/libkern/os BUILD/obj/EXPORT_HDRS/os
           cat > libkern/os/firehose_buffer_private.h << 'FH'
           #ifndef _OS_FIREHOSE_BUFFER_PRIVATE_H_
@@ -107,6 +105,7 @@ jobs:
           STUBDIR="$GITHUB_WORKSPACE/ci-lib"
           mkdir -p "$BIN" "$STUBDIR"
           cat > "$OFF" << 'H'
+          #define KPC_MAX_COUNTERS 32
           #pragma clang diagnostic ignored "-Wsuggest-override"
           #pragma clang diagnostic ignored "-Wsuggest-destructor-override"
           #pragma clang diagnostic ignored "-Wunused-but-set-variable"
@@ -135,7 +134,6 @@ jobs:
           #pragma clang diagnostic ignored "-Wint-conversion"
           #pragma clang diagnostic ignored "-Wpointer-sign"
           #pragma clang diagnostic ignored "-Wc2x-compat"
-#define KPC_MAX_COUNTERS 32
           H
           REAL_CLANG=$(xcrun -f clang)
           REAL_CXX=$(xcrun -f clang++)
@@ -143,7 +141,6 @@ jobs:
           printf '#!/bin/bash\nexec "%s" -include "%s" "$@"\n' "$REAL_CXX" "$OFF" > "$BIN/clang++"
           printf '#!/bin/bash\nexec "%s" -E -include "%s" "$@"\n' "$REAL_CLANG" "$OFF" > "$BIN/cpp-wrap"
           chmod +x "$BIN/clang" "$BIN/clang++" "$BIN/cpp-wrap"
-          # firehose .a for link only (no -include of competing header)
           if [ -f "$STUBDIR/firehose_kernel_stub.c" ]; then
             $(xcrun -f clang) -c "$STUBDIR/firehose_kernel_stub.c" -I"$STUBDIR" -o "$STUBDIR/firehose_kernel_stub.o"
             $(xcrun -f ar) rcs "$STUBDIR/libfirehose_kernel.a" "$STUBDIR/firehose_kernel_stub.o"
