@@ -135,6 +135,7 @@ jobs:
           #pragma clang diagnostic ignored "-Wint-conversion"
           #pragma clang diagnostic ignored "-Wpointer-sign"
           #pragma clang diagnostic ignored "-Wc2x-compat"
+#define KPC_MAX_COUNTERS 32
           H
           REAL_CLANG=$(xcrun -f clang)
           REAL_CXX=$(xcrun -f clang++)
