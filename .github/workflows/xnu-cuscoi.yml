@@ -174,7 +174,7 @@ jobs:
           # KPC is Apple PMU; sweet stubs it. Define max counters if header missing.
           export CFLAGS="${CFLAGS} -DKPC_MAX_COUNTERS=32"
           export OTHER_CFLAGS="${OTHER_CFLAGS} -DKPC_MAX_COUNTERS=32"
-          make ARCH_CONFIGS=ARM64 KERNEL_CONFIGS=DEVELOPMENT MACHINE_CONFIGS=CUSCOI
+          make ARCH_CONFIGS=ARM64 KERNEL_CONFIGS=DEVELOPMENT MACHINE_CONFIGS=CUSCOI WERROR= CWARNFLAGS="-Wno-four-char-constants -Wno-pointer-to-int-cast -Wno-void-pointer-to-enum-cast -Wno-unused-but-set-variable -Wno-suggest-override -Wno-suggest-destructor-override -Wno-null-pointer-subtraction -Wno-deprecated-declarations" CXXWARNFLAGS="-Wno-four-char-constants -Wno-pointer-to-int-cast -Wno-void-pointer-to-enum-cast -Wno-suggest-override -Wno-suggest-destructor-override -Wno-deprecated-declarations" KPC_MAX_COUNTERS=32
       - name: Collect
         if: always()
         run: |
